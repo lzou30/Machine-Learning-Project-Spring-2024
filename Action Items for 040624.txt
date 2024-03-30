@@ -1,4 +1,4 @@
 Action Items for 04/06/24:
 
-- fix zip code
+- fix zip code (looks are errors)
 - recode "in progress" from Company response variable
