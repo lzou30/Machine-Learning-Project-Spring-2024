@@ -85,7 +85,55 @@ group1_merged <- merge(group1.1, zip_fips_states,
 group1_merged_na <- group1_merged %>%
   filter(is.na(STCOUNTYFP)) # instances where the FIPS data didn't find a matching ZIP/state
 
+# Obtain frequencies for preparation for Chi-Square for relief
+mergedrelief <- data.frame(table(group1_merged$relief))
+mergednarelief <- data.frame(table(group1_merged_na$relief))
+combined_count_relief <- merge(mergedrelief , mergednarelief, by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_relief[is.na(combined_count_relief)] <- 0
+names(combined_count_relief)[1]<-paste("relief")
+names(combined_count_relief)[2]<-paste("Merged")
+names(combined_count_relief)[3]<-paste("Unmerged") 
 
+# Obtain frequencies for preparation for Chi-Square for Tags
+mergedTags <- data.frame(table(group1_merged$Tags))
+mergednaTags <- data.frame(table(group1_merged_na$Tags))
+combined_count_Tags <- merge(mergedTags , mergednaTags, by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Tags[is.na(combined_count_Tags)] <- 0
+names(combined_count_Tags)[1]<-paste("Tags")
+names(combined_count_Tags)[2]<-paste("Merged")
+names(combined_count_Tags)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Submitted.via
+mergedSubmitted.via <- data.frame(table(group1_merged$Submitted.via))
+mergednaSubmitted.via <- data.frame(table(group1_merged_na$Submitted.via))
+combined_count_Submitted.via <- merge(mergedSubmitted.via , mergednaSubmitted.via, by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Submitted.via[is.na(combined_count_Submitted.via)] <- 0
+names(combined_count_Submitted.via)[1]<-paste("Submitted.via")
+names(combined_count_Submitted.via)[2]<-paste("Merged")
+names(combined_count_Submitted.via)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Consumer.disputed.
+mergedConsumer.disputed. <- data.frame(table(group1_merged$Consumer.disputed.))
+mergednaConsumer.disputed. <- data.frame(table(group1_merged_na$Consumer.disputed.))
+combined_count_Consumer.disputed. <- merge(mergedConsumer.disputed. , mergednaConsumer.disputed., by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Consumer.disputed.[is.na(combined_count_Consumer.disputed.)] <- 0
+names(combined_count_Consumer.disputed.)[1]<-paste("Consumer.disputed.")
+names(combined_count_Consumer.disputed.)[2]<-paste("Merged")
+names(combined_count_Consumer.disputed.)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Timely.response.
+mergedTimely.response. <- data.frame(table(group1_merged$Timely.response.))
+mergednaTimely.response. <- data.frame(table(group1_merged_na$Timely.response.))
+combined_count_Timely.response. <- merge(mergedTimely.response. , mergednaTimely.response., by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Timely.response.[is.na(combined_count_Timely.response.)] <- 0
+names(combined_count_Timely.response.)[1]<-paste("Timely.response.")
+names(combined_count_Timely.response.)[2]<-paste("Merged")
+names(combined_count_Timely.response.)[3]<-paste("Unmerged") 
+
+# Drop unnecessary dataframes
+rm(mergedrelief, mergednarelief, mergedTags, mergednaTags, mergedSubmitted.via, mergednaSubmitted.via, mergedConsumer.disputed., mergednaConsumer.disputed., mergedTimely.response., mergednaTimely.response.)
+
+### Require code to merge some responses to meet assumptions for Chi Square Test
 ### Require code for method of comparison between two groups, most likely chisquare
 ### Require code for imputation and method
 ### Require code for merging group and FIPS code dataset again post-imputation
