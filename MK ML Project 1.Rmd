@@ -28,12 +28,12 @@ MK_theme <-   theme(text = element_text(family = "Times New Roman"),
 ```
 
 ## 1. Go to Blackboard and download the files. Starting with the CFPB complaint data, please load the data into R and clean the data set. Please note, each team has a different random sample. 
-a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
-b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
-i. How should “In progress” be coded? 
-ii.	Should the other conditions be coded into dummy variables? 
-c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
-i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
+# a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
+# b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
+# i. How should “In progress” be coded? 
+# ii.	Should the other conditions be coded into dummy variables? 
+# c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
+# i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
 
 ```{r, echo = TRUE}
 # Bring in data 
