@@ -133,8 +133,37 @@ names(combined_count_Timely.response.)[3]<-paste("Unmerged")
 # Drop unnecessary dataframes
 rm(mergedrelief, mergednarelief, mergedTags, mergednaTags, mergedSubmitted.via, mergednaSubmitted.via, mergedConsumer.disputed., mergednaConsumer.disputed., mergedTimely.response., mergednaTimely.response.)
 
-### Require code to merge some responses to meet assumptions for Chi Square Test
-### Require code for method of comparison between two groups, most likely chisquare
+
+# Chi-Square for combined_count_relief
+combined_count_relief <- subset(combined_count_relief, select = -relief)
+combined_count_relief <- data.matrix(combined_count_relief)
+rownames(combined_count_relief) <- c("0","1")
+chisq.test(combined_count_relief)
+
+# Fisher Exact Test for combined_count_relief
+combined_count_Tags <- subset(combined_count_Tags, select = -Tags)
+combined_count_Tags <- data.matrix(combined_count_Tags)
+rownames(combined_count_Tags) <- c("None","Older American", "Older American, Servicemember", "Servicemember")
+fisher.test(combined_count_Tags)
+
+# Fisher Exact Test for combined_count_Submitted.via
+combined_count_Submitted.via <- subset(combined_count_Submitted.via, select = -Submitted.via)
+combined_count_Submitted.via <- data.matrix(combined_count_Submitted.via)
+rownames(combined_count_Submitted.via) <- c("Fax","Phone", "Postal Mail", "Referral", "Web", "Web Referral")
+fisher.test(combined_count_Submitted.via)
+
+# Chi-Square for combined_count_Consumer.disputed.
+combined_count_Consumer.disputed. <- subset(combined_count_Consumer.disputed., select = -Consumer.disputed.)
+combined_count_Consumer.disputed. <- data.matrix(combined_count_Consumer.disputed.)
+rownames(combined_count_Consumer.disputed.) <- c("N/A", "No", "Yes")
+chisq.test(combined_count_Consumer.disputed.)
+
+# Chi-Square for combined_count_Timely.response.
+combined_count_Timely.response. <- subset(combined_count_Timely.response., select = -Timely.response.)
+combined_count_Timely.response. <- data.matrix(combined_count_Timely.response.)
+rownames(combined_count_Timely.response.) <- c("No", "Yes")
+chisq.test(combined_count_Timely.response.)
+
 ### Require code for imputation and method
 ### Require code for merging group and FIPS code dataset again post-imputation
 
