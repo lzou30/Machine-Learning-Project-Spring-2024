@@ -1,0 +1,181 @@
+---
+title: "ML Project Group 1"
+author: "Morgan Kleidon"
+date: "2024-03-30"
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Load packages
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, stringr, dplyr, readxl, readr)
+
+# Set custom theme
+MK_theme <-   theme(text = element_text(family = "Times New Roman"),
+                    panel.background = element_blank(),
+                    axis.text.x.bottom = element_text(size = 12),
+                    axis.text.y.left = element_text(size = 12),
+                    axis.title.x.bottom = element_text(size = 16),
+                    axis.title.y.left = element_text(size = 16),
+                    title = element_text(size = 16, face = "bold"),
+                    panel.border = element_rect(color = "black", linewidth = 0.3, fill = "transparent"),
+                    panel.grid = element_line(color = "black", linewidth = 0.1),
+                    legend.position = "none")
+```
+
+## 1
+
+1.	Go to Blackboard and download the files. Starting with the CFPB complaint data (https://www.consumerfinance.gov/data-research/consumer-complaints/search ), please load the data into R and clean the data set. Please note, each team has a different random sample (also note, I have withheld several random data sets so you cannot recreate the final version by going to the website 😊). 
+a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
+b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
+i. How should “In progress” be coded? 
+ii.	Should the other conditions be coded into dummy variables? 
+c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
+i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
+
+
+```{r, echo = TRUE}
+# Bring in data 
+group1 <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/group1.csv")
+colnames(group1)
+group1.1 <- group1[,-1]
+
+which(nchar(group1.1$ZIP.code) != 5) # no non-five-digit zip codes
+sum(is.na(group1$ZIP.code)) # no NAs
+group1.1[str_detect(group1.1$ZIP.code, "X"), ] # no zip codes with "X"s
+
+which(group1.1$ZIP.code == "00000" | group1.1$ZIP.code == "11111" | group1.1$ZIP.code == "22222" |
+        group1.1$ZIP.code == "33333" | group1.1$ZIP.code == "44444" | group1.1$ZIP.code == "55555" |
+        group1.1$ZIP.code == "66666" | group1.1$ZIP.code == "77777" | group1.1$ZIP.code == "88888" |
+        group1.1$ZIP.code == "99999") # only real zip codes
+group1.1 <- group1.1 %>%
+  filter(State != "AE" & State != "AP")
+
+# Load in zip_fips
+zip_fips <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/zip_fips.csv")
+colnames(zip_fips)
+zip_fips1 <- zip_fips[,-1]
+str(zip_fips1$ZIP)
+table(zip_fips1$STATE)
+
+# Filter non-US states
+zip_fips_states <- zip_fips1 %>%
+  filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
+
+# Add leading zero
+add_char <- function(x, pos, insert) {      
+  gsub(paste0("^(.{", pos, "})(.*)$"),
+       paste0("\\1", insert, "\\2"),
+       x)
+}
+
+zip_fips_states$ZIP <- ifelse(nchar(zip_fips_states$ZIP) == 4, add_char(x = zip_fips_states$ZIP,
+                                                                     pos = 0, 
+                                                                     insert = "0"), zip_fips_states$ZIP)
+
+# Merge datasets
+group1_merged <- merge(group1.1, zip_fips_states, 
+                       by.x = c("ZIP.code", "State"),
+                       by.y = c("ZIP", "STATE"), all.x = TRUE)
+
+group1_merged_na <- group1_merged %>%
+  filter(is.na(STCOUNTYFP)) # instances where the FIPS data didn't find a matching ZIP/state
+
+# Obtain frequencies for preparation for Chi-Square for relief
+mergedrelief <- data.frame(table(group1_merged$relief))
+mergednarelief <- data.frame(table(group1_merged_na$relief))
+combined_count_relief <- merge(mergedrelief , mergednarelief, by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_relief[is.na(combined_count_relief)] <- 0
+names(combined_count_relief)[1]<-paste("relief")
+names(combined_count_relief)[2]<-paste("Merged")
+names(combined_count_relief)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Tags
+mergedTags <- data.frame(table(group1_merged$Tags))
+mergednaTags <- data.frame(table(group1_merged_na$Tags))
+combined_count_Tags <- merge(mergedTags , mergednaTags, by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Tags[is.na(combined_count_Tags)] <- 0
+names(combined_count_Tags)[1]<-paste("Tags")
+names(combined_count_Tags)[2]<-paste("Merged")
+names(combined_count_Tags)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Submitted.via
+mergedSubmitted.via <- data.frame(table(group1_merged$Submitted.via))
+mergednaSubmitted.via <- data.frame(table(group1_merged_na$Submitted.via))
+combined_count_Submitted.via <- merge(mergedSubmitted.via , mergednaSubmitted.via, by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Submitted.via[is.na(combined_count_Submitted.via)] <- 0
+names(combined_count_Submitted.via)[1]<-paste("Submitted.via")
+names(combined_count_Submitted.via)[2]<-paste("Merged")
+names(combined_count_Submitted.via)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Consumer.disputed.
+mergedConsumer.disputed. <- data.frame(table(group1_merged$Consumer.disputed.))
+mergednaConsumer.disputed. <- data.frame(table(group1_merged_na$Consumer.disputed.))
+combined_count_Consumer.disputed. <- merge(mergedConsumer.disputed. , mergednaConsumer.disputed., by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Consumer.disputed.[is.na(combined_count_Consumer.disputed.)] <- 0
+names(combined_count_Consumer.disputed.)[1]<-paste("Consumer.disputed.")
+names(combined_count_Consumer.disputed.)[2]<-paste("Merged")
+names(combined_count_Consumer.disputed.)[3]<-paste("Unmerged") 
+
+# Obtain frequencies for preparation for Chi-Square for Timely.response.
+mergedTimely.response. <- data.frame(table(group1_merged$Timely.response.))
+mergednaTimely.response. <- data.frame(table(group1_merged_na$Timely.response.))
+combined_count_Timely.response. <- merge(mergedTimely.response. , mergednaTimely.response., by = "Var1", all.x = TRUE, all.y = TRUE)
+combined_count_Timely.response.[is.na(combined_count_Timely.response.)] <- 0
+names(combined_count_Timely.response.)[1]<-paste("Timely.response.")
+names(combined_count_Timely.response.)[2]<-paste("Merged")
+names(combined_count_Timely.response.)[3]<-paste("Unmerged") 
+
+# Drop unnecessary dataframes
+rm(mergedrelief, mergednarelief, mergedTags, mergednaTags, mergedSubmitted.via, mergednaSubmitted.via, mergedConsumer.disputed., mergednaConsumer.disputed., mergedTimely.response., mergednaTimely.response.)
+
+
+# Chi-Square for combined_count_relief
+combined_count_relief <- subset(combined_count_relief, select = -relief)
+combined_count_relief <- data.matrix(combined_count_relief)
+rownames(combined_count_relief) <- c("0","1")
+chisq.test(combined_count_relief)
+
+# Fisher Exact Test for combined_count_relief
+combined_count_Tags <- subset(combined_count_Tags, select = -Tags)
+combined_count_Tags <- data.matrix(combined_count_Tags)
+rownames(combined_count_Tags) <- c("None","Older American", "Older American, Servicemember", "Servicemember")
+fisher.test(combined_count_Tags)
+
+# Fisher Exact Test for combined_count_Submitted.via
+combined_count_Submitted.via <- subset(combined_count_Submitted.via, select = -Submitted.via)
+combined_count_Submitted.via <- data.matrix(combined_count_Submitted.via)
+rownames(combined_count_Submitted.via) <- c("Fax","Phone", "Postal Mail", "Referral", "Web", "Web Referral")
+fisher.test(combined_count_Submitted.via)
+
+# Chi-Square for combined_count_Consumer.disputed.
+combined_count_Consumer.disputed. <- subset(combined_count_Consumer.disputed., select = -Consumer.disputed.)
+combined_count_Consumer.disputed. <- data.matrix(combined_count_Consumer.disputed.)
+rownames(combined_count_Consumer.disputed.) <- c("N/A", "No", "Yes")
+chisq.test(combined_count_Consumer.disputed.)
+
+# Chi-Square for combined_count_Timely.response.
+combined_count_Timely.response. <- subset(combined_count_Timely.response., select = -Timely.response.)
+combined_count_Timely.response. <- data.matrix(combined_count_Timely.response.)
+rownames(combined_count_Timely.response.) <- c("No", "Yes")
+chisq.test(combined_count_Timely.response.)
+
+### Require code for imputation and method
+### Require code for merging group and FIPS code dataset again post-imputation
+
+# Bring in data
+UrbanInstituteData<- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/dia_lbls_all_overall_county_2022_02_14Sep2023.xlsx")
+
+colnames(UrbanInstituteData)
+
+which(nchar(UrbanInstituteData$`County FIPS`) != 5) # no non-five-digit FIPS Code
+sum(is.na(UrbanInstituteData$`County FIPS`)) # no NAs
+UrbanInstituteData[str_detect(UrbanInstituteData$`County FIPS`, "X"), ] # no FIPS Code with "X"s
+
+
+
+```
