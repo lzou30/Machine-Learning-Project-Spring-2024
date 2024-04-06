@@ -6,11 +6,12 @@ output: pdf_document
 ---
 
 ```{r setup, include = FALSE}
+# Clear all 
+rm(list = ls())
+
+# Setup
 knitr::opts_chunk$set(echo = TRUE)
-```
 
-
-```{r}
 # Load packages
 pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools)
 
@@ -27,19 +28,28 @@ MK_theme <-   theme(text = element_text(family = "Times New Roman"),
                     legend.position = "none")
 ```
 
-## 1. Go to Blackboard and download the files. Starting with the CFPB complaint data, please load the data into R and clean the data set. Please note, each team has a different random sample. 
-# a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
-# b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
-# i. How should “In progress” be coded? 
-# ii.	Should the other conditions be coded into dummy variables? 
-# c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
-# i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
+# 1. Go to Blackboard and download the files. Starting with the CFPB complaint data, please load the data into R and clean the data set. Please note, each team has a different random sample. 
+## a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
+## b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
+## i. How should “In progress” be coded? 
+## ii.	Should the other conditions be coded into dummy variables? 
+## c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
+## i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
 
 ```{r, echo = TRUE}
 # Bring in data 
 group1 <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/group1.csv")
 colnames(group1)
 group1 <- group1[,-1]
+
+# Add leading zero
+add_char <- function(x, pos, insert) {      
+  gsub(paste0("^(.{", pos, "})(.*)$"),
+       paste0("\\1", insert, "\\2"),
+       x)
+}
+
+
 
 which(nchar(group1$ZIP.code) == 4) # no four-digit zip codes
 group1.1 <- group1 %>%
@@ -56,13 +66,7 @@ table(zip_fips$STATE)
 zip_fips_states <- zip_fips %>%
   filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
 
-# Add leading zero
-add_char <- function(x, pos, insert) {      
-  gsub(paste0("^(.{", pos, "})(.*)$"),
-       paste0("\\1", insert, "\\2"),
-       x)
-}
-
+# Add a leading zero if zip is only four characters long
 zip_fips_states$ZIP <- ifelse(nchar(zip_fips_states$ZIP) == 4, add_char(x = zip_fips_states$ZIP,
                                                                      pos = 0, 
                                                                      insert = "0"), zip_fips_states$ZIP)
@@ -84,9 +88,9 @@ group1.2 <- group1.2[,-15] # Drop company response to consumer
 
 ```
 
-## 2. Your first task is to clean the zip code variable. Many of the zip codes are missing, incomplete, or missing the leading zero. Your group must pick a missing data method to fix this data!
-# a.	For the dependent variable (relief) and 3 other variables of your choosing, do a simple statistical comparison (2 sample proportions or t-test, Chi-Square,…) to check for differences between the subgroups that are missing zip code and those that provided the information. 
-# i. Suggestion: You will want to create a dummy variable to indicate if the variable is missing for the rest of the analysis. Using the aggregate() function in r, this should be an easy task. 
+# 2. Your first task is to clean the zip code variable. Many of the zip codes are missing, incomplete, or missing the leading zero. Your group must pick a missing data method to fix this data!
+## a.	For the dependent variable (relief) and 3 other variables of your choosing, do a simple statistical comparison (2 sample proportions or t-test, Chi-Square,…) to check for differences between the subgroups that are missing zip code and those that provided the information. 
+## i. Suggestion: You will want to create a dummy variable to indicate if the variable is missing for the rest of the analysis. Using the aggregate() function in r, this should be an easy task. 
 
 
 ```{r}
@@ -104,7 +108,7 @@ chisq.test(group1.3$Submitted.via, group1.3$missing_zip) # p-value significant
 
 # Tags
 table(group1.3$Tags, group1.3$missing_zip)
-chisq.test(group1.3$Tags, group1.3$missing_zip) # Does not meet assumptions
+fisher.test(group1.3$Tags, group1.3$missing_zip) # Does not meet assumptions
 
 # Relief
 table(group1.3$relief, group1.3$missing_zip)
@@ -116,16 +120,32 @@ chisq.test(group1.3$Timely.response., group1.3$missing_zip) # p-value *almost* s
 
 ```
 
-# b. Please note, you have the state in all cases. You must fix the fill this field with a zip code that is a plausible value (the corrected/imputed zip code must be from the State listed). 
-# i. You can drop any non-state in the analysis. (“DC”, “UNITED STATES MINOR OUTLYING ISLANDS”, “AA” (Armed Forces), …) 
-# c. Any imputation method is acceptable as long as you defend your choice. You can use mean/mode replacement, nearest neighbor, regression based models, …
+## b. Please note, you have the state in all cases. You must fix the fill this field with a zip code that is a plausible value (the corrected/imputed zip code must be from the State listed). 
+## i. You can drop any non-state in the analysis. (“DC”, “UNITED STATES MINOR OUTLYING ISLANDS”, “AA” (Armed Forces), …) 
+## c. Any imputation method is acceptable as long as you defend your choice. You can use mean/mode replacement, nearest neighbor, regression based models, …
 ```{r}
 # Use mode to impute zip code
 group1.4 <- group1.3 %>%
   group_by(State) %>%
   mutate(imp_zip = ifelse(missing_zip == TRUE, Mode(ZIP.code),  ZIP.code))
 
+# Could use rfImpute to impute the incorrect zip codes, but would need to convert the wrong ones into NAs
+
 ```
 
-# d.	Please indicate any limitations or biases your imputation has on the analysis? 
-# i. If I replace all values with the state capital zip code, how would that impact my analysis?
+## d.	Please indicate any limitations or biases your imputation has on the analysis? 
+## i. If I replace all values with the state capital zip code, how would that impact my analysis?
+\textcolor{red}{Indicate any limitations here.}
+
+# 3.	Merge on the FIPS county code for each Zip code I have provided in the folder. 
+## a.	All zip codes should have a FIPS county code. If it does not, 
+## i.	Check to make sure you formatted the data right (i.e. 2019 will not merge with 02019 correctly if both are characters.)
+## ii.	If the zip code is nonexistent (someone made it up, like 99999), then you need to treat it as missing and replace it using the same method as in part 2. 
+## iii.	*** Zip codes to change, and it is possible that the Zip to Fips code file I am using from last year misses a new observation. Just treat it as missing and move on. 
+```{r}
+group1.5 <- group1.4[,-c(19:20)] # remove COUNTYNAME & STCOUNTYFP
+group1.6 <- merge(group1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y = c("ZIP", "STATE"))
+
+
+```
+
