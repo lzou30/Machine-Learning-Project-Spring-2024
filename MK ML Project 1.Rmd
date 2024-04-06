@@ -49,8 +49,6 @@ add_char <- function(x, pos, insert) {
        x)
 }
 
-
-
 which(nchar(group1$ZIP.code) == 4) # no four-digit zip codes
 group1.1 <- group1 %>%
   filter(State != "AE" & State != "AP") # Remove non-state observations
