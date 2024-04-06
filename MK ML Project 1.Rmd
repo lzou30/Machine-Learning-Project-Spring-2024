@@ -13,7 +13,7 @@ rm(list = ls())
 knitr::opts_chunk$set(echo = TRUE)
 
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -48,6 +48,8 @@ add_char <- function(x, pos, insert) {
        paste0("\\1", insert, "\\2"),
        x)
 }
+
+
 
 which(nchar(group1$ZIP.code) == 4) # no four-digit zip codes
 group1.1 <- group1 %>%
@@ -142,8 +144,59 @@ group1.4 <- group1.3 %>%
 ## iii.	*** Zip codes to change, and it is possible that the Zip to Fips code file I am using from last year misses a new observation. Just treat it as missing and move on. 
 ```{r}
 group1.5 <- group1.4[,-c(19:20)] # remove COUNTYNAME & STCOUNTYFP
-group1.6 <- merge(group1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y = c("ZIP", "STATE"))
-
+group1.6 <- merge(group1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y = c("ZIP", "STATE")) # merge
 
 ```
 
+# 4. Merge on county level debt information from The Urban Institute for 2022 on by county FIPS code.
+## a.	Suggestion: Be careful how you load the data to make sure missing values do not change everything to text. 
+## b. There is other debt data at the site above if you want to add it also, but it is not required. 
+## c. Remember to do left joins/merges on the data. The data file also has state totals you want to drop from the analysis. 
+```{r}
+# Bring in data from the Urban Institute
+county_debt <- read_excel("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/dia_lbls_all_overall_county_2022_02_14Sep2023.xlsx")
+
+# Change column names
+names(county_debt)[names(county_debt) == "County FIPS"] <- "fips"
+
+# Add a leading zero to the group1.6 FIPS code
+group1.6$fips <- ifelse(nchar(group1.6$STCOUNTYFP) == 4, add_char(x = group1.6$STCOUNTYFP,
+                                                                     pos = 0, 
+                                                                     insert = "0"), group1.6$STCOUNTYFP)
+
+# Merge county debt data with group1.6
+group1.7 <- merge(group1.6, county_debt, by = "fips", all.x = TRUE)
+
+```
+
+# 5. Load the Census demographic file into R. Before you merge it into the debt collection data, you need to combine the State and County FIPs to merge the data and then develop features. Each group need to add measures that would indicate bias in debt collection against: 
+## a. Gender
+## b. Age
+## i. Bias against young (0-24 years) and old (65+) are of particular concern
+## ii. You need to create a dummy variable for county level older Americans. 
+## c. Race
+## d. Ethnicity 
+## i. Hispanic vs. non-Hispanic at minimum. 
+## e. Also, from the original CFPB dataset create dummy variables for Service Members and Older American based on the Tags column. 
+
+```{r}
+# Read in Census data
+census <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/cc-est2022-all.csv")
+colnames(census)
+
+# Add leading zeros to county and state FIPS
+census$STATE2 <- sprintf("%02d", census$STATE)
+census$COUNTY2 <- sprintf("%03d", census$COUNTY)
+
+# Append state to county FIPS
+census$STCOUNTY <- paste0(census$STATE2, census$COUNTY2)
+
+# Move STCOUNTY to the first column of the dataset
+census <- census %>%
+  relocate(STCOUNTY, .before = SUMLEV)
+
+# Merge debt data with Census data
+# group1.8 <- merge(group1.8, census, by.x = "fips", by.y = "STCOUNTY")
+
+
+```
