@@ -1,0 +1,12 @@
+040624 Meeting notes:
+
+- moved add char for leading zero code after pulling in group1 csv
+- chi-sq tables were run with the Tags variable using the fisher test instead of a Chi-sq test since it is a categorical variable
+- merged zipcode+group1 data to debt data using fips
+- corrected fips codes for Census data and group1 data
+- waiting to do last merge after next class; going to ask Tony to clarify the Census merge instructions and ask about a codebook for Census variables
+
+ACTION ITEMS:
+- everyone should add their own version of the code to the GitHub
+- A consolidated version will be our pending final version
+- Next meeting will be on April 13th from 10am to 12pm in room 307 in the Library
