@@ -1,18 +1,12 @@
----
-title: "ML Project Group 1"
-author: "Morgan Kleidon"
-date: "2024-03-30"
-output: pdf_document
----
-
 ```{r setup, include = FALSE}
+# Clear all 
+rm(list = ls())
+
+# Setup
 knitr::opts_chunk$set(echo = TRUE)
-```
 
-
-```{r}
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, stringr, dplyr, readxl, readr)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, dplyr, readxl, readr)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -27,44 +21,19 @@ MK_theme <-   theme(text = element_text(family = "Times New Roman"),
                     legend.position = "none")
 ```
 
-## 1
-
-1.	Go to Blackboard and download the files. Starting with the CFPB complaint data (https://www.consumerfinance.gov/data-research/consumer-complaints/search ), please load the data into R and clean the data set. Please note, each team has a different random sample (also note, I have withheld several random data sets so you cannot recreate the final version by going to the website 😊). 
-a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
-b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
-i. How should “In progress” be coded? 
-ii.	Should the other conditions be coded into dummy variables? 
-c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
-i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
-
+# 1. Go to Blackboard and download the files. Starting with the CFPB complaint data, please load the data into R and clean the data set. Please note, each team has a different random sample. 
+## a. I am providing the code for the dependent variable “relief” from the company response variable. Please note, you will need to drop the company response variable before you do the modeling as this will perfectly predict the DV. 
+## b. Your group needs to make decisions on how to treat the rest of this variable. In your write up, defend your answer. 
+## i. How should “In progress” be coded? 
+## ii.	Should the other conditions be coded into dummy variables? 
+## c. All of the CFPB data documentation is located at https://cfpb.github.io/api/ccdb/fields.html . 
+## i. While not required, it would be in your best interest to recode some of these variables to have shorter values in the name. 
 
 ```{r, echo = TRUE}
 # Bring in data 
-group1 <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/group1.csv")
+group1 <- read_csv("C:/Users/jiemi/Downloads/Machine Learning for Economists/Project/group1.csv")
 colnames(group1)
-group1.1 <- group1[,-1]
-
-which(nchar(group1.1$ZIP.code) != 5) # no non-five-digit zip codes
-sum(is.na(group1$ZIP.code)) # no NAs
-group1.1[str_detect(group1.1$ZIP.code, "X"), ] # no zip codes with "X"s
-
-which(group1.1$ZIP.code == "00000" | group1.1$ZIP.code == "11111" | group1.1$ZIP.code == "22222" |
-        group1.1$ZIP.code == "33333" | group1.1$ZIP.code == "44444" | group1.1$ZIP.code == "55555" |
-        group1.1$ZIP.code == "66666" | group1.1$ZIP.code == "77777" | group1.1$ZIP.code == "88888" |
-        group1.1$ZIP.code == "99999") # only real zip codes
-group1.1 <- group1.1 %>%
-  filter(State != "AE" & State != "AP")
-
-# Load in zip_fips
-zip_fips <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/zip_fips.csv")
-colnames(zip_fips)
-zip_fips1 <- zip_fips[,-1]
-str(zip_fips1$ZIP)
-table(zip_fips1$STATE)
-
-# Filter non-US states
-zip_fips_states <- zip_fips1 %>%
-  filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
+group1 <- group1[,-1]
 
 # Add leading zero
 add_char <- function(x, pos, insert) {      
@@ -73,109 +42,178 @@ add_char <- function(x, pos, insert) {
        x)
 }
 
+
+
+which(nchar(group1$ZIP.code) == 4) # no four-digit zip codes
+group1.1 <- group1 %>%
+  filter(State != "AE" & State != "AP") # Remove non-state observations
+
+# Load in zip_fips
+zip_fips <- read_csv("C:/Users/jiemi/Downloads/Machine Learning for Economists/Project/zip_fips.csv")
+colnames(zip_fips)
+zip_fips <- zip_fips[,-1]
+str(zip_fips$ZIP)
+table(zip_fips$STATE)
+
+# Filter non-US states
+zip_fips_states <- zip_fips %>%
+  filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
+
+# Add a leading zero if zip is only four characters long
 zip_fips_states$ZIP <- ifelse(nchar(zip_fips_states$ZIP) == 4, add_char(x = zip_fips_states$ZIP,
                                                                      pos = 0, 
                                                                      insert = "0"), zip_fips_states$ZIP)
 
-# Merge datasets
-group1_merged <- merge(group1.1, zip_fips_states, 
+# Merge datasets to find odd zip codes
+group1.2 <- merge(group1.1, zip_fips_states, 
                        by.x = c("ZIP.code", "State"),
                        by.y = c("ZIP", "STATE"), all.x = TRUE)
 
-group1_merged_na <- group1_merged %>%
-  filter(is.na(STCOUNTYFP)) # instances where the FIPS data didn't find a matching ZIP/state
+group1.2$missing_zip <- as.factor(is.na(group1.2$STCOUNTYFP))
+group1.2 <- group1.2[,-15] # Drop company response to consumer
 
-# Obtain frequencies for preparation for Chi-Square for relief
-mergedrelief <- data.frame(table(group1_merged$relief))
-mergednarelief <- data.frame(table(group1_merged_na$relief))
-combined_count_relief <- merge(mergedrelief , mergednarelief, by = "Var1", all.x = TRUE, all.y = TRUE)
-combined_count_relief[is.na(combined_count_relief)] <- 0
-names(combined_count_relief)[1]<-paste("relief")
-names(combined_count_relief)[2]<-paste("Merged")
-names(combined_count_relief)[3]<-paste("Unmerged") 
-
-# Obtain frequencies for preparation for Chi-Square for Tags
-mergedTags <- data.frame(table(group1_merged$Tags))
-mergednaTags <- data.frame(table(group1_merged_na$Tags))
-combined_count_Tags <- merge(mergedTags , mergednaTags, by = "Var1", all.x = TRUE, all.y = TRUE)
-combined_count_Tags[is.na(combined_count_Tags)] <- 0
-names(combined_count_Tags)[1]<-paste("Tags")
-names(combined_count_Tags)[2]<-paste("Merged")
-names(combined_count_Tags)[3]<-paste("Unmerged") 
-
-# Obtain frequencies for preparation for Chi-Square for Submitted.via
-mergedSubmitted.via <- data.frame(table(group1_merged$Submitted.via))
-mergednaSubmitted.via <- data.frame(table(group1_merged_na$Submitted.via))
-combined_count_Submitted.via <- merge(mergedSubmitted.via , mergednaSubmitted.via, by = "Var1", all.x = TRUE, all.y = TRUE)
-combined_count_Submitted.via[is.na(combined_count_Submitted.via)] <- 0
-names(combined_count_Submitted.via)[1]<-paste("Submitted.via")
-names(combined_count_Submitted.via)[2]<-paste("Merged")
-names(combined_count_Submitted.via)[3]<-paste("Unmerged") 
-
-# Obtain frequencies for preparation for Chi-Square for Consumer.disputed.
-mergedConsumer.disputed. <- data.frame(table(group1_merged$Consumer.disputed.))
-mergednaConsumer.disputed. <- data.frame(table(group1_merged_na$Consumer.disputed.))
-combined_count_Consumer.disputed. <- merge(mergedConsumer.disputed. , mergednaConsumer.disputed., by = "Var1", all.x = TRUE, all.y = TRUE)
-combined_count_Consumer.disputed.[is.na(combined_count_Consumer.disputed.)] <- 0
-names(combined_count_Consumer.disputed.)[1]<-paste("Consumer.disputed.")
-names(combined_count_Consumer.disputed.)[2]<-paste("Merged")
-names(combined_count_Consumer.disputed.)[3]<-paste("Unmerged") 
-
-# Obtain frequencies for preparation for Chi-Square for Timely.response.
-mergedTimely.response. <- data.frame(table(group1_merged$Timely.response.))
-mergednaTimely.response. <- data.frame(table(group1_merged_na$Timely.response.))
-combined_count_Timely.response. <- merge(mergedTimely.response. , mergednaTimely.response., by = "Var1", all.x = TRUE, all.y = TRUE)
-combined_count_Timely.response.[is.na(combined_count_Timely.response.)] <- 0
-names(combined_count_Timely.response.)[1]<-paste("Timely.response.")
-names(combined_count_Timely.response.)[2]<-paste("Merged")
-names(combined_count_Timely.response.)[3]<-paste("Unmerged") 
-
-# Drop unnecessary dataframes
-rm(mergedrelief, mergednarelief, mergedTags, mergednaTags, mergedSubmitted.via, mergednaSubmitted.via, mergedConsumer.disputed., mergednaConsumer.disputed., mergedTimely.response., mergednaTimely.response.)
-
-
-# Chi-Square for combined_count_relief
-combined_count_relief <- subset(combined_count_relief, select = -relief)
-combined_count_relief <- data.matrix(combined_count_relief)
-rownames(combined_count_relief) <- c("0","1")
-chisq.test(combined_count_relief)
-
-# Fisher Exact Test for combined_count_relief
-combined_count_Tags <- subset(combined_count_Tags, select = -Tags)
-combined_count_Tags <- data.matrix(combined_count_Tags)
-rownames(combined_count_Tags) <- c("None","Older American", "Older American, Servicemember", "Servicemember")
-fisher.test(combined_count_Tags)
-
-# Fisher Exact Test for combined_count_Submitted.via
-combined_count_Submitted.via <- subset(combined_count_Submitted.via, select = -Submitted.via)
-combined_count_Submitted.via <- data.matrix(combined_count_Submitted.via)
-rownames(combined_count_Submitted.via) <- c("Fax","Phone", "Postal Mail", "Referral", "Web", "Web Referral")
-fisher.test(combined_count_Submitted.via)
-
-# Chi-Square for combined_count_Consumer.disputed.
-combined_count_Consumer.disputed. <- subset(combined_count_Consumer.disputed., select = -Consumer.disputed.)
-combined_count_Consumer.disputed. <- data.matrix(combined_count_Consumer.disputed.)
-rownames(combined_count_Consumer.disputed.) <- c("N/A", "No", "Yes")
-chisq.test(combined_count_Consumer.disputed.)
-
-# Chi-Square for combined_count_Timely.response.
-combined_count_Timely.response. <- subset(combined_count_Timely.response., select = -Timely.response.)
-combined_count_Timely.response. <- data.matrix(combined_count_Timely.response.)
-rownames(combined_count_Timely.response.) <- c("No", "Yes")
-chisq.test(combined_count_Timely.response.)
-
-### Require code for imputation and method
-### Require code for merging group and FIPS code dataset again post-imputation
-
-# Bring in data
-UrbanInstituteData<- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/dia_lbls_all_overall_county_2022_02_14Sep2023.xlsx")
-
-colnames(UrbanInstituteData)
-
-which(nchar(UrbanInstituteData$`County FIPS`) != 5) # no non-five-digit FIPS Code
-sum(is.na(UrbanInstituteData$`County FIPS`)) # no NAs
-UrbanInstituteData[str_detect(UrbanInstituteData$`County FIPS`, "X"), ] # no FIPS Code with "X"s
-
+# group1_merged$missing <- as.factor(complete.cases(group1_merged))
+# group1_merged <- group1_merged[,-c(20:21)]
+# group1_merged$ZIP.code <- as.factor(group1_merged$ZIP.code)
+# noy <- is.na(group1_merged$relief)
+# group1_merged <- group1_merged[which(noy == 0),]
 
 
 ```
+
+# 2. Your first task is to clean the zip code variable. Many of the zip codes are missing, incomplete, or missing the leading zero. Your group must pick a missing data method to fix this data!
+## a.	For the dependent variable (relief) and 3 other variables of your choosing, do a simple statistical comparison (2 sample proportions or t-test, Chi-Square,…) to check for differences between the subgroups that are missing zip code and those that provided the information. 
+## i. Suggestion: You will want to create a dummy variable to indicate if the variable is missing for the rest of the analysis. Using the aggregate() function in r, this should be an easy task. 
+
+
+```{r}
+# Submitted.via
+table(group1.2$Submitted.via, group1.2$missing_zip)
+group1.3 <- group1.2 %>%
+  mutate(Submitted.via = case_when(Submitted.via == "Web Referral" ~ "Referral",
+            Submitted.via == "Web" ~ "Web", 
+            Submitted.via == "Referral" ~ "Referral",
+            Submitted.via == "Postal mail" ~ "Postal mail",
+            Submitted.via == "Phone" ~ "Phone",
+            Submitted.via == "Fax" ~ "Fax")) # Recode Web Referral to Referral
+table(group1.3$Submitted.via, group1.3$missing_zip) # Meets assumptions now :) 
+chisq.test(group1.3$Submitted.via, group1.3$missing_zip) # p-value significant
+
+# Tags
+table(group1.3$Tags, group1.3$missing_zip)
+fisher.test(group1.3$Tags, group1.3$missing_zip) # Does not meet assumptions for Chi-Square
+
+# Relief
+table(group1.3$relief, group1.3$missing_zip)
+chisq.test(group1.3$relief, group1.3$missing_zip) # p-value = 1
+
+# Timely.response
+table(group1.3$Timely.response., group1.3$missing_zip)
+chisq.test(group1.3$Timely.response., group1.3$missing_zip) # p-value *almost* significant
+
+```
+
+## b. Please note, you have the state in all cases. You must fix the fill this field with a zip code that is a plausible value (the corrected/imputed zip code must be from the State listed). 
+## i. You can drop any non-state in the analysis. (“DC”, “UNITED STATES MINOR OUTLYING ISLANDS”, “AA” (Armed Forces), …) 
+## c. Any imputation method is acceptable as long as you defend your choice. You can use mean/mode replacement, nearest neighbor, regression based models, …
+```{r}
+# Use mode to impute zip code
+group1.4 <- group1.3 %>%
+  group_by(State) %>%
+  mutate(imp_zip = ifelse(missing_zip == TRUE, Mode(ZIP.code),  ZIP.code))
+
+# Could use rfImpute to impute the incorrect zip codes, but would need to convert the wrong ones into NAs
+
+```
+
+## d.	Please indicate any limitations or biases your imputation has on the analysis? 
+## i. If I replace all values with the state capital zip code, how would that impact my analysis?
+\textcolor{red}{Indicate any limitations here.}
+
+# 3.	Merge on the FIPS county code for each Zip code I have provided in the folder. 
+## a.	All zip codes should have a FIPS county code. If it does not, 
+## i.	Check to make sure you formatted the data right (i.e. 2019 will not merge with 02019 correctly if both are characters.)
+## ii.	If the zip code is nonexistent (someone made it up, like 99999), then you need to treat it as missing and replace it using the same method as in part 2. 
+## iii.	*** Zip codes to change, and it is possible that the Zip to Fips code file I am using from last year misses a new observation. Just treat it as missing and move on. 
+```{r}
+group1.5 <- group1.4[,-c(19:20)] # remove COUNTYNAME & STCOUNTYFP
+group1.6 <- merge(group1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y = c("ZIP", "STATE")) # merge
+
+# Add a leading zero to the group1.6 FIPS code
+group1.6$fips <- sprintf("%05d", group1.6$STCOUNTYFP)
+
+```
+
+# 4. Merge on county level debt information from The Urban Institute for 2022 on by county FIPS code.
+## a.	Suggestion: Be careful how you load the data to make sure missing values do not change everything to text. 
+## b. There is other debt data at the site above if you want to add it also, but it is not required. 
+## c. Remember to do left joins/merges on the data. The data file also has state totals you want to drop from the analysis. 
+```{r}
+# Bring in data from the Urban Institute
+county_debt <- read_excel("C:/Users/jiemi/Downloads/Machine Learning for Economists/Project/dia_lbls_all_overall_county_2022_02_14Sep2023.xlsx")
+
+# Change column names
+names(county_debt)[names(county_debt) == "County FIPS"] <- "fips"
+
+# Merge county debt data with group1.6
+group1.7 <- merge(group1.6, county_debt, by = "fips", all.x = TRUE)
+
+```
+
+# 5. Load the Census demographic file into R. Before you merge it into the debt collection data, you need to combine the State and County FIPs to merge the data and then develop features. Each group need to add measures that would indicate bias in debt collection against: 
+## a. Gender
+## b. Age
+## i. Bias against young (0-24 years) and old (65+) are of particular concern
+## ii. You need to create a dummy variable for county level older Americans. 
+## c. Race
+## d. Ethnicity 
+## i. Hispanic vs. non-Hispanic at minimum. 
+## e. Also, from the original CFPB dataset create dummy variables for Service Members and Older American based on the Tags column. 
+
+```{r}
+# Read in Census data
+census <- read_csv("C:/Users/jiemi/Downloads/Machine Learning for Economists/Project/cc-est2022-all.csv")
+colnames(census)
+
+# Add leading zeros to county and state FIPS
+census$STATE2 <- sprintf("%02s", census$STATE)
+census$COUNTY2 <- sprintf("%03s", census$COUNTY)
+
+# Append state to county FIPS
+census$STCOUNTY <- paste0(census$STATE2, census$COUNTY2)
+
+# Move STCOUNTY to the first column of the dataset
+census <- census %>%
+  relocate(STCOUNTY, .before = SUMLEV)
+
+# Subsetting for most recent year and for total
+census1 <- subset(census, YEAR == 4)
+census2 <- subset(census1, AGEGRP == 0)
+
+# Subsetting for youth
+censusyoung <- census1 %>%
+  filter(AGEGRP %in% c('1', '2', '3', '4', '5'))
+
+# Subsetting for olds
+censusold <- census1 %>%
+  filter(AGEGRP %in% c('14', '15', '16', '17', '18'))
+
+censusyoungsum <- censusyoung %>%
+  group_by(STCOUNTY) %>%
+  summarize(
+    YOUTH_MALE = sum(TOT_MALE),
+    YOUTH_FEMALE = sum(TOT_FEMALE),
+  )
+
+censusoldsum <- censusold %>%
+  group_by(STCOUNTY) %>%
+  summarize(
+    OLD_MALE = sum(TOT_MALE),
+    OLD_FEMALE = sum(TOT_FEMALE),
+  )
+
+census3 <- merge(census2, censusyoungsum, by = "STCOUNTY")
+census3 <- merge(census3, censusoldsum, by = "STCOUNTY")
+
+# Merge debt data with Census data
+group1.8 <- merge(group1.7, census3, by.x = "fips", by.y = "STCOUNTY")
