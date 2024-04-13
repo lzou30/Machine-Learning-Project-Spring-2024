@@ -1,0 +1,8 @@
+April 13th Meeting Notes
+
+- merged census data and created demographic measures
+- standardized debt data and ran PCA (need to flesh this out)
+- checked code changes from last meeting
+	- changes to consolidated code:
+		- line 111 add ', workspace = 2e+09'
+		- line 186 and 187 change d to s
