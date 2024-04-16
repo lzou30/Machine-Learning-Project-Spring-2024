@@ -1,0 +1,11 @@
+Variables to keep from group1.9:
+- Share of people of color
+- Share with medical debt in collections, All, Comm of color, White Comm
+- Average household income, All
+- 
+
+
+
+Variables to drop from group1.9:
+- consumer complaint narrative
+-agegrp (keeping old vs young, avoid multicollinearity)
