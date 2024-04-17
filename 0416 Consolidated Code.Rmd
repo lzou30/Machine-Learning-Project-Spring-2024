@@ -149,7 +149,7 @@ group1.6 <- merge(group1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y 
 
 # Add a leading zero to the group1.6 FIPS code
 group1.6$fips <- sprintf("%05d", group1.6$STCOUNTYFP)
-
+#group1.6$fips <- sprintf("%05s", group1.6$STCOUNTYFP)
 ```
 
 # 4. Merge on county level debt information from The Urban Institute for 2022 on by county FIPS code.
