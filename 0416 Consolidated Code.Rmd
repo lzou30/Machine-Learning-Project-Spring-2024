@@ -76,6 +76,7 @@ group1.2 <- merge(group1.1, zip_fips_states,
                   by.x = c("ZIP.code", "State"),
                   by.y = c("ZIP", "STATE"), all.x = TRUE)
 
+group1.2$ZIP.code <- sprintf("%05d", group1.2$ZIP.code)
 group1.2$missing_zip <- as.factor(is.na(group1.2$STCOUNTYFP))
 group1.2 <- group1.2[,-15] # Drop company response to consumer
 
