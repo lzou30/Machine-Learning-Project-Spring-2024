@@ -345,4 +345,19 @@ plot(1:n.scree, Es[1:3], type = "b", ylab = "Objective Function",
      xlab = "# Clusters", main = "Scree Plot")
 
 
+group1.9$cluster2 <- kpres2$cluster
+group1.9$cluster3 <- kpres3$cluster
+
+group2.0 <- group1.9
+group2.0 <- group2.0[,-c(3:4,10, 12:13, 16, 19, 22:25)] # dropped date sent
+
+group2.0$NAs <- apply(group2.0, 1, function(row) any(is.na(row))) # no NAs
+group2.0 <- group2.0[, -which(names(group2.0) %in% c("NAs"))]
+
+library(lubridate)
+group2.0$Date.received1=mdy(group2.0$Date.received)
+group2.0$year <- year(group2.0$Date.received1)
+
+group2.0 <- subset(group2.0, select = -c(Date.received, Date.received1))
+
 ```
