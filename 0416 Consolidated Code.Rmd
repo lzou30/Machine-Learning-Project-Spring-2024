@@ -56,7 +56,7 @@ group1.1 <- group1 %>%
   filter(State != "AE" & State != "AP") # Remove non-state observations
 
 # Load in zip_fips
-zip_fips <- read_csv("C:/Users/lzou7/OneDrive/Desktop/GWU/ML in R/Project/zip_fips.csv")
+zip_fips <- read.csv("C:/Users/lzou7/OneDrive/Desktop/GWU/ML in R/Project/zip_fips.csv", colClasses = c(ZIP = "character"))
 colnames(zip_fips)
 zip_fips <- zip_fips[,-1]
 str(zip_fips$ZIP)
