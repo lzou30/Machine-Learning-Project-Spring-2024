@@ -1,3 +1,10 @@
+---
+title: "ML Project Group 1"
+author: "Morgan Kleidon"
+date: "2024-03-30"
+output: html_document
+---
+
 ```{r setup, include = FALSE}
 # Clear all 
 rm(list = ls())
@@ -6,7 +13,7 @@ rm(list = ls())
 knitr::opts_chunk$set(echo = TRUE)
 
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, dplyr, readxl, readr)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -42,8 +49,6 @@ add_char <- function(x, pos, insert) {
        x)
 }
 
-
-
 which(nchar(group1$ZIP.code) == 4) # no four-digit zip codes
 group1.1 <- group1 %>%
   filter(State != "AE" & State != "AP") # Remove non-state observations
@@ -70,14 +75,7 @@ group1.2 <- merge(group1.1, zip_fips_states,
                        by.y = c("ZIP", "STATE"), all.x = TRUE)
 
 group1.2$missing_zip <- as.factor(is.na(group1.2$STCOUNTYFP))
-group1.2 <- group1.2[,-15] # Drop company response to consumer
-
-# group1_merged$missing <- as.factor(complete.cases(group1_merged))
-# group1_merged <- group1_merged[,-c(20:21)]
-# group1_merged$ZIP.code <- as.factor(group1_merged$ZIP.code)
-# noy <- is.na(group1_merged$relief)
-# group1_merged <- group1_merged[which(noy == 0),]
-
+group1.2 <- group1.2[,-15] # Drop company response to consumer b/c it is perfecly correlated with relief
 
 ```
 
@@ -101,7 +99,7 @@ chisq.test(group1.3$Submitted.via, group1.3$missing_zip) # p-value significant
 
 # Tags
 table(group1.3$Tags, group1.3$missing_zip)
-fisher.test(group1.3$Tags, group1.3$missing_zip) # Does not meet assumptions for Chi-Square
+fisher.test(group1.3$Tags, group1.3$missing_zip) # Does not meet assumptions
 
 # Relief
 table(group1.3$relief, group1.3$missing_zip)
@@ -123,7 +121,14 @@ group1.4 <- group1.3 %>%
   mutate(imp_zip = ifelse(missing_zip == TRUE, Mode(ZIP.code),  ZIP.code))
 
 # Could use rfImpute to impute the incorrect zip codes, but would need to convert the wrong ones into NAs
-
+# group1.4.rf <- group1.3 %>%
+#   mutate(Consumer.complaint.narrative = case_when(is.na(Consumer.complaint.narrative) == TRUE ~ "N/A", is.na(Consumer.complaint.narrative) == FALSE ~ Consumer.complaint.narrative), ZIP.code = ifelse(missing_zip == TRUE, NA, ZIP.code)) %>%
+#   select(-c(COUNTYNAME, STCOUNTYFP))
+# 
+# group1.4.rf2 <- group1.4.rf %>%
+#   mutate(ZIP.code = as.factor(ZIP.code)) %>%
+#   group_by(State) %>%
+#   rfImpute(relief ~., group1.4.rf)
 ```
 
 ## d.	Please indicate any limitations or biases your imputation has on the analysis? 
@@ -138,10 +143,6 @@ group1.4 <- group1.3 %>%
 ```{r}
 group1.5 <- group1.4[,-c(19:20)] # remove COUNTYNAME & STCOUNTYFP
 group1.6 <- merge(group1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y = c("ZIP", "STATE")) # merge
-
-# Add a leading zero to the group1.6 FIPS code
-group1.6$fips <- sprintf("%05d", group1.6$STCOUNTYFP)
-
 ```
 
 # 4. Merge on county level debt information from The Urban Institute for 2022 on by county FIPS code.
@@ -155,6 +156,11 @@ county_debt <- read_excel("C:/Users/jiemi/Downloads/Machine Learning for Economi
 # Change column names
 names(county_debt)[names(county_debt) == "County FIPS"] <- "fips"
 
+# Add a leading zero to the group1.6 FIPS code
+group1.6$fips <- ifelse(nchar(group1.6$STCOUNTYFP) == 4, add_char(x = group1.6$STCOUNTYFP,
+                                                                     pos = 0, 
+                                                                     insert = "0"), group1.6$STCOUNTYFP)
+
 # Merge county debt data with group1.6
 group1.7 <- merge(group1.6, county_debt, by = "fips", all.x = TRUE)
 
@@ -164,10 +170,10 @@ group1.7 <- merge(group1.6, county_debt, by = "fips", all.x = TRUE)
 ## a. Gender
 ## b. Age
 ## i. Bias against young (0-24 years) and old (65+) are of particular concern
-## ii. You need to create a dummy variable for county level older Americans. 
+### ii. You need to create a dummy variable for county level older Americans. 
 ## c. Race
 ## d. Ethnicity 
-## i. Hispanic vs. non-Hispanic at minimum. 
+### i. Hispanic vs. non-Hispanic at minimum. 
 ## e. Also, from the original CFPB dataset create dummy variables for Service Members and Older American based on the Tags column. 
 
 ```{r}
@@ -186,130 +192,156 @@ census$STCOUNTY <- paste0(census$STATE2, census$COUNTY2)
 census <- census %>%
   relocate(STCOUNTY, .before = SUMLEV)
 
-# Subsetting for most recent year and for total
-census1 <- subset(census, YEAR == 4)
-census2 <- subset(census1, AGEGRP == 0)
+# Subsetting for the total column (where AGEGRP = 0)
+census1 <- subset(census, AGEGRP == 0)
 
-# Subsetting for youth
-censusyoung <- census1 %>%
-  filter(AGEGRP %in% c('1', '2', '3', '4', '5'))
+# Find the mean grouped by STCOUNTY, AGEGRP because there are four years we need to collapse
+census2 <- census %>%
+  group_by(STCOUNTY, AGEGRP) %>%
+  summarize(across(TOT_POP:HNAC_FEMALE, ~mean(., na.rm = TRUE)))
 
-# Subsetting for olds
-censusold <- census1 %>%
-  filter(AGEGRP %in% c('14', '15', '16', '17', '18'))
+# Rename columns
+colnames(census2) <- paste0(colnames(census2), "_MEAN")
+names(census2)[names(census2) == "STCOUNTY_MEAN"] <- "STCOUNTY"
+names(census2)[names(census2) == "AGEGRP_MEAN"] <- "AGEGRP"
 
+# Subset to total 
+census_total <- census2 %>%
+  filter(AGEGRP == 0)
+
+# Subsetting for youth (0-24)
+censusyoung <- census2 %>%
+  filter(AGEGRP %in% c(1, 2, 3, 4, 5))
+
+# Subsetting for elderly (65+)
+censusold <- census2 %>%
+  filter(AGEGRP %in% c(14, 15, 16, 17, 18))
+
+# Find the sum of young people by county
 censusyoungsum <- censusyoung %>%
   group_by(STCOUNTY) %>%
   summarize(
-    YOUTH_MALE = sum(TOT_MALE),
-    YOUTH_FEMALE = sum(TOT_FEMALE),
+    YOUTH_MALE = sum(TOT_MALE_MEAN),
+    YOUTH_FEMALE = sum(TOT_FEMALE_MEAN),
   )
 
+# Find the sum of elderly people by county
 censusoldsum <- censusold %>%
   group_by(STCOUNTY) %>%
   summarize(
-    OLD_MALE = sum(TOT_MALE),
-    OLD_FEMALE = sum(TOT_FEMALE),
+    OLD_MALE = sum(TOT_MALE_MEAN),
+    OLD_FEMALE = sum(TOT_FEMALE_MEAN),
   )
 
-census3 <- merge(census2, censusyoungsum, by = "STCOUNTY")
-census3 <- merge(census3, censusoldsum, by = "STCOUNTY")
+# Merging the young/old variables with the rest of the census data
+census3 <- merge(census_total, censusyoungsum, by = "STCOUNTY")
+census4 <- merge(census3, censusoldsum, by = "STCOUNTY")
 
-census3$pct_old <- (census3$OLD_FEMALE + census3$OLD_MALE)/census3$TOT_POP
-census3$pct_young <- (census3$YOUTH_FEMALE + census3$YOUTH_MALE)/census3$TOT_POP
-census3$pct_blk <- (census3$BA_FEMALE + census3$BA_MALE)/census3$TOT_POP
-census3$pct_asian <- (census3$AA_FEMALE + census3$AA_MALE)/census3$TOT_POP
-census3$pct_native <- (census3$IA_FEMALE + census3$IA_MALE)/census3$TOT_POP
-census3$pct_his <- (census3$H_FEMALE + census3$H_MALE)/census3$TOT_POP
-census3$pct_old <- (census3$OLD_FEMALE + census3$OLD_MALE)/census3$TOT_POP
-census3$pct_old <- (census3$OLD_FEMALE + census3$OLD_MALE)/census3$TOT_POP
-census3$pct_women <- (census3$TOT_FEMALE)/census3$TOT_POP
+# Creating variables to indicate bias
+census4$pct_old <- (census4$OLD_FEMALE + census4$OLD_MALE)/census4$TOT_POP
+census4$pct_young <- (census4$YOUTH_FEMALE + census4$YOUTH_MALE)/census4$TOT_POP
+census4$pct_blk <- (census4$BA_FEMALE + census4$BA_MALE)/census4$TOT_POP
+census4$pct_asian <- (census4$AA_FEMALE + census4$AA_MALE)/census4$TOT_POP
+census4$pct_native <- (census4$IA_FEMALE + census4$IA_MALE)/census4$TOT_POP
+census4$pct_his <- (census4$H_FEMALE + census4$H_MALE)/census4$TOT_POP
+census4$pct_women <- census4$TOT_FEMALE/census4$TOT_POP
 
-census3$COUNTY_OLD <- ifelse(census3$pct_old >= 0.5, 1, 0)
-# old county = Sumnter, Florida
+# Share of ederly population in America in 2020 was 16.8%, if a county has over this threshold, it is considered to be an older county
+census4$COUNTY_OLD <- ifelse(census4$pct_old > 0.168, 1, 0)
 
+```
+
+# 6. Once you have taken all the Census data and created a data frame of demographic measures with one row for each county, merge it onto your debt collection data frame. 
+```{r}
 # Merge debt data with Census data
-group1.8 <- merge(group1.7, census3, by.x = "fips", by.y = "STCOUNTY")
+group1.8 <- merge(group1.7, census4, by.x = "fips", by.y = "STCOUNTY")
+
+# Create a flag for servicemembers and older Americans
+group1.8$service_mem <- ifelse(grepl("Servicemember", group1.8$Tags), 1, 0)
+group1.8$old <- ifelse(grepl("Older American", group1.8$Tags), 1, 0)
 
 ```
 
-e and 6-ish
+# 7. The debt collection variables are highly correlated. Take all or a subset of at least 5 of them and try to create a principal component out of them. Merge the resulting principal component back onto the main data set. 
+## a. You may choose to keep only a subset in the final PCA analysis, but you must start with at least 5 variables. 
+### i. Often we start with a larger number but drop the ones that don’t fit. 
+## b. You are welcome to keep more than one PC.
+### i. Maybe 3 variables load on one and 4 on another PC. Then just load them as two new variables. 
+## c. You may also try PCA on other variables in the data set to see if you get a better model as part of your feature selection. 
+## d. Suggestion: Examine the percent missing for each variable as you are selecting variables. 
+
 ```{r}
-# Create dummies for old or service member
-group1.8$ServMember <- ifelse(grepl("Servicemember", group1.8$Tags), 1, 0)
-group1.8$Old <- ifelse(grepl("Older American", group1.8$Tags), 1, 0)
+# Create a subset of debt collection
+debt_subset <- county_debt[, -c(1,2,3)]
+
+# Abbreviate the names of the variables
+colnames(debt_subset) <- abbreviate(colnames(debt_subset), minlength = 4)
+
+# Make all variables numeric
+debt_subset2 <- debt_subset %>%
+  sapply(as.numeric) %>%
+  as.data.frame()
+
+# Get percentage of missing values per variable
+num_missing <- colSums(is.na(debt_subset2))
+pct_missing <- as.data.frame(num_missing/nrow(debt_subset2))
+colnames(pct_missing) <- "pct_missing"
+pct_missing <- rownames_to_column(pct_missing, var = "var_name")
+
+# Create a variable to indicate missing values
+debt_subset2$is_complete <- as.factor(complete.cases(debt_subset2))
+
+# Can't have a correlation matrix with NAs, must impute
+debt_subset2.imp <- na.roughfix(debt_subset2)
+
+# Get the correlation matrix
+debt_matrix <- cor(debt_subset2.imp[,-c(26)])
+ggcorrplot(debt_matrix)
+
+# # Perform PCA
+# debt_pca <- princomp(debt_matrix)
+# summary(debt_pca)
+# fviz_eig(debt_pca, addlabels = TRUE)
+# loadings <- debt_pca$loadings
+# scores <- debt_pca$scores
+
+# Perform PCA
+debt_pca2 <- prcomp(debt_subset2.imp[,-c(26)], scale = TRUE)
+summary(debt_pca2)
+fviz_eig(debt_pca2, addlabels = TRUE)
+rotated_values2 <- debt_pca2$x
+loadings2 <- debt_pca2$rotation
+
 ```
 
-```{r}
-# Normalizing the Data
-#First make a clean debt data dataframe
-#note: 
-#make a dataframe with numeric variables of interest
-debt_clean <- as.data.frame(county_debt[, -c(1,2,3, 25:28)])
-debt_clean <- debt_clean %>%
-  mutate(across(everything(), as.numeric))
-#debt_clean <- lapply(debt_clean, as.numeric)
-#debt_clean <- debt_clean[, -c(1)]
-
-#clean up variable names
-colnames(debt_clean) <- abbreviate(colnames(debt_clean), minlength = 4)
-
-debt_clean1 <- debt_clean
-
-debt_clean1$NAs <- apply(debt_clean1, 1, function(row) any(is.na(row)))
-
-impute_with_mode <- function(series) {
-  mode_value <- as.character(sort(table(series), decreasing = TRUE)[1])  # Calculate the mode
-  return(ifelse(is.na(series), mode_value, series))}
-
-for (col in names(debt_clean1)) {
-  debt_clean1[[col]] <- impute_with_mode(debt_clean1[[col]])
-}
-
-debt_clean1$imp <- ifelse(debt_clean1$NAs, "Imputed", "Not Imputed")
-debt_clean2 <- debt_clean1[,-c(22:23)]
-debt_clean2 <- debt_clean2 %>%
-  mutate(across(everything(), as.numeric))
-
-library(corrplot)
-
-corr_matrix <- cor(debt_clean2, use = "pairwise.complete.obs")
-
-library(ggcorrplot)
-ggcorrplot(corr_matrix) #maybe try three different groups: all Comm of color, and white comm
-#codebook pending
-```
 # 7
 ```{r}
 # Standardize values
-#clean_debt2 <- clean_debt[,-c()]
-debt <- debt_clean2
+debt <- debt_subset2.imp
 debt[] <- lapply(debt, as.numeric)
 
-library("factoextra")
+library(corrplot)
+corr_matrix <- cor(debt_subset2.imp[,-c(26)], use = "pairwise.complete.obs")
+
 debt.pca <- princomp(corr_matrix)
 summary(debt.pca)
 fviz_eig(debt.pca, addlabels = TRUE)
 
-debt_pca <- prcomp(debt, scale = TRUE) # automatically standardizes the data
+debt.pca <- prcomp(debt, scale = TRUE) # automatically standardizes the data
 
 # PCA loadings
-debt.pca$loadings[, 1:5]
-
-loadings_matrix <- debt_pca$rotation
-pcdebtscores <- debt_pca$x
+loadings_matrix <- debt.pca$rotation
+pcdebtscores <- debt.pca$x
 
 county_debt1 <- county_debt[, -c(4:28)]
 county_debt1 <- cbind(county_debt1, pcdebtscores[, 1:2])
 
-group1.9 <- group1.8[,-c(26:46)]
-group1.9 <- group1.9[,-c(30:34)]
+group1.9 <- group1.8[,-c(22:25, 26:46, 51:54)]
 group1.9 <- merge(group1.9, county_debt1, by = "fips", all.x = TRUE)
-group1.9 <- group1.9[,-c(121:122)]
-group1.9 <- group1.9[,-c(105:106)]
+group1.9 <- group1.9[,-c(110:111)]
 ```
-# 8
 
+# 8
 ```{r}
 library(clustMixType)
 library("wesanderson")
@@ -317,20 +349,29 @@ library("wesanderson")
 group1.9$medical_debt_binary <- ifelse(group1.9$Sub.product == "Medical debt", 1, 0)
 colnames(group1.9)
 
-z <- group1.9[,c(121,26,27,117,118)]
+z <- data.frame(
+  'medical_debt_binary' = group1.9$medical_debt_binary,
+  'ServiceMember' = group1.9$service_mem,
+  'OldPerson' = group1.9$old,
+  'ShareOfPeopleOfColor' = group1.9$'Share of people of color',
+  'AverageHouseHoldIncomeAll' = group1.9$'Average household income, All'
+)
+
 z[,1]<- as.factor(z[,1] )
-z[,2]<- scale(as.numeric(z[,2] ))
-z[,3]<- scale(as.numeric(z[,3] ))
-z[,4]<- as.factor(z[,4] )
-z[,5]<- as.factor(z[,5] )
+z[,2]<- as.factor(z[,2] )
+z[,3]<- as.factor(z[,3] )
+z[,4]<- scale(as.numeric(z[,4] ))
+z[,5]<- scale(as.numeric(z[,5] ))
 
 # 2 cluster
 kpres2 <-kproto(x=z,k=2)
+
 # 3 cluster
 kpres3 <-kproto(x=z,k=3)
 
 # Plots
-clprofiles(kpres2, z, col=wes_palette("Royal1",4, type="continuous")) 
+clprofiles(kpres2, z, col=wes_palette("Royal1",2, type="continuous")) 
+clprofiles(kpres3, z, col=wes_palette("Royal1",3, type="continuous"))
 
 n.scree <- ncol(z) - 2
 
@@ -344,14 +385,25 @@ for (i in 1:n.scree) {
 plot(1:n.scree, Es[1:3], type = "b", ylab = "Objective Function",
      xlab = "# Clusters", main = "Scree Plot")
 
-
 group1.9$cluster2 <- kpres2$cluster
 group1.9$cluster3 <- kpres3$cluster
 
-group2.0 <- group1.9
-group2.0 <- group2.0[,-c(3:4,10, 12:13, 16, 19, 22:25)] # dropped date sent
+```
 
-group2.0$NAs <- apply(group2.0, 1, function(row) any(is.na(row))) # no NAs
+# 9. You are about to start doing supervised machine learning to predict debt relief. Before you proceed any further, sit with your group and make sure you are content with the measurement of all the variables. 
+## a. Check missing values on merged data. Impute/delete as necessary and document accordingly. 
+## b. Identify which variables should be in the model (i.e. Should date of complaint be included?) You do not need to keep all of the variables, you can choose to drop the ones you think add less value. You should at least 2 keep variables from each data set. 
+## c. Check the measurement of each variable (i.e. Should date be measure, by day or year?) Should something be logged? 
+## d. Check all the factors to make sure they have enough observations at each level. 
+## e. Optional: You may want to make a design matrix that that includes only the independent variables you want in the model and drops the id variables such as zip code and Complaint ID. 
+## f. You may add Clusters and principal components from other variables if you think it will help. 
+## g. You are absolutely allowed to add additional variables from other public sources to your dataset. This is in no way required. 
+```{r}
+
+group2.0 <- group1.9
+group2.0 <- group2.0[,-c(3:4,6, 10, 12:13, 16, 19, 22:23, 108:109, 112)] # dropped state, zipcode, county as we have imputed, and fips captures both state and county id, product as it is all "debt collection" and has no predictive power, customer complaint narrative and complaint id as they are all unique, company as there are 200+ of them and may be of limited predictive power, date sent, tags and its binaries as it is captured by cluster along with other info captured by cluster
+
+group2.0$NAs <- apply(group2.0, 1, function(row) any(is.na(row))) # no NAs from inspection besides the hardcoded NAs, can leave or RF
 group2.0 <- group2.0[, -which(names(group2.0) %in% c("NAs"))]
 
 library(lubridate)
@@ -360,4 +412,37 @@ group2.0$year <- year(group2.0$Date.received1)
 
 group2.0 <- subset(group2.0, select = -c(Date.received, Date.received1))
 
+group2.1 <- group2.0 
+group2.1[sapply(group2.1, is.character)] <- lapply(group2.1[sapply(group2.1, is.character)], 
+                                       as.factor)
+
+
+### hypothetically if we would like to pca the demographics along gender lines
+group2.1Female <- group2.1 %>% select(matches("_FEMALE"))
+group2.1Male <- group2.1 %>% select(matches("_MALE"))
+
+corr_matrix1 <- cor(group2.1Female, use = "pairwise.complete.obs")
+corr_matrix2 <- cor(group2.1Male, use = "pairwise.complete.obs")
+
+female.pca <- princomp(corr_matrix1)
+male.pca <- princomp(corr_matrix2)
+
+summary(female.pca)
+summary(male.pca)
+
+fviz_eig(female.pca, addlabels = TRUE)
+fviz_eig(male.pca, addlabels = TRUE)
+
+female.pca <- prcomp(group2.1Female, scale = TRUE) # automatically standardizes the data
+male.pca <- prcomp(group2.1Male, scale = TRUE) # automatically standardizes the data
+
+# PCA loadings
+loadings_matrix1 <- female.pca$rotation
+loadings_matrix2 <- male.pca$rotation
+
+femalescores <- female.pca$x
+malescores <- male.pca$x
+
+group2.2 <- cbind(group2.1, femalescores[, 1:3], malescores[, 1:3])
+group2.2 <- group2.2[, -c(15:88)]
 ```
