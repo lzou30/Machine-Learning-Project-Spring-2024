@@ -13,7 +13,7 @@ rm(list = ls())
 knitr::opts_chunk$set(echo = TRUE)
 
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -259,6 +259,8 @@ group1.8 <- merge(group1.7, census4, by.x = "fips", by.y = "STCOUNTY")
 # Create a flag for servicemembers and older Americans
 group1.8$service_mem <- ifelse(grepl("Servicemember", group1.8$Tags), 1, 0)
 group1.8$old <- ifelse(grepl("Older American", group1.8$Tags), 1, 0)
+group1.8$old_service_mem <- ifelse(grepl("Older American, Servicemember", group1.9$Tags), 1, 0)
+group1.8$none <- ifelse(grepl("None", group1.9$Tags), 1, 0)
 
 ```
 
@@ -298,85 +300,72 @@ debt_subset2.imp <- na.roughfix(debt_subset2)
 debt_matrix <- cor(debt_subset2.imp[,-c(26)])
 ggcorrplot(debt_matrix)
 
-# # Perform PCA
-# debt_pca <- princomp(debt_matrix)
-# summary(debt_pca)
-# fviz_eig(debt_pca, addlabels = TRUE)
-# loadings <- debt_pca$loadings
-# scores <- debt_pca$scores
+# Perform PCA on 5 MOST correlated variables (SwmdicA, SwadicA, AhiWc, AhiCoc, AhiA)
+top_corr_matrix <- cor(debt_subset2.imp[,c(1, 7, 23:25)])
+top_corr_sub <- debt_subset2.imp[,c(1, 7, 23:25)]
 
 # Perform PCA
-debt_pca2 <- prcomp(debt_subset2.imp[,-c(26)], scale = TRUE)
-summary(debt_pca2)
-fviz_eig(debt_pca2, addlabels = TRUE)
-rotated_values2 <- debt_pca2$x
-loadings2 <- debt_pca2$rotation
+debt_pca <- prcomp(top_corr_sub, scale = TRUE)
+summary(debt_pca)
+fviz_eig(debt_pca, addlabels = TRUE)
+loadings <- debt_pca$rotation
+scores <- debt_pca$x
 
-```
+# Merge back on to imputed county debt data
+county_debt1 <- cbind(county_debt[,1:3], debt_subset2.imp)
+county_debt1 <- county_debt1[, -c(4, 10, 26:28)]
+county_debt1 <- cbind(county_debt1, scores[, 1:2])
 
-# 7
-```{r}
-# Standardize values
-debt <- debt_clean2
-debt[] <- lapply(debt, as.numeric)
-
-debt.pca <- princomp(corr_matrix)
-summary(debt.pca)
-fviz_eig(debt.pca, addlabels = TRUE)
-
-debt.pca <- prcomp(debt, scale = TRUE) # automatically standardizes the data
-
-# PCA loadings
-debt.pca$loadings[,1:5]
-loadings_matrix <- debt_pca$rotation
-pcdebtscores <- debt_pca$x
-
-county_debt1 <- county_debt[, -c(4:28)]
-county_debt1 <- cbind(county_debt1, pcdebtscores[, 1:2])
-
-group1.9 <- group1.8[,-c(26:46)]
-group1.9 <- group1.9[,-c(30:34)]
+# Merge back with the rest of the data
+group1.9 <- group1.8[,-c(24:50)]
 group1.9 <- merge(group1.9, county_debt1, by = "fips", all.x = TRUE)
-group1.9 <- group1.9[,-c(121:122)]
-group1.9 <- group1.9[,-c(105:106)]
+
 ```
 
-# 8
+# 8. Do a mixed-type Cluster analysis using the R package clustMixType. Create a clustering based on medical debt. 
+## a.	Make a binary variable out of Sub Product == Medical Debt. 
+## b. Pick 5 other variables that you believe may be related to medical debt. There must be at least 2 factors and 2 continuous. 
+## c. Save the clusters as output and add them back to the main data set. 
 ```{r}
-library(clustMixType)
-library("wesanderson")
+# Make binary variable out of Sub product == Medical Debt
+group1.9$medical_debt <- ifelse(group1.9$Sub.product == "Medical debt", 1, 0)
 
-group1.9$medical_debt_binary <- ifelse(group1.9$Sub.product == "Medical debt", 1, 0)
-colnames(group1.9)
+z <- group1.9[, c("medical_debt", "old_service_mem",
+                "pct_old", "Sopoc",
+                "SoslhwsldidA", "pct_women")]
 
-z <- group1.9[,c(121,26,27,117,118)]
-z[,1]<- as.factor(z[,1] )
-z[,2]<- scale(as.numeric(z[,2] ))
-z[,3]<- scale(as.numeric(z[,3] ))
-z[,4]<- as.factor(z[,4] )
-z[,5]<- as.factor(z[,5] )
+z[,1]<- as.factor(z[,1])
+z[,2]<- as.factor(z[,2])
+z[,3]<- scale(as.numeric(z[,3]))
+z[,4] <- scale(as.numeric(z[,4]))
+z[,5]<- scale(as.numeric(z[,5]))
+z[,6] <- scale(as.numeric(z[,6]))
 
 # 2 cluster
 kpres2 <-kproto(x=z,k=2)
+kpres2
 
 # 3 cluster
 kpres3 <-kproto(x=z,k=3)
+kpres3
 
 # Plots
-clprofiles(kpres2, z, col=wes_palette("Royal1",4, type="continuous")) 
+clprofiles(kpres2, z, col=wes_palette("Royal1",2, type="continuous")) 
+clprofiles(kpres3, z, col=wes_palette("Royal1",2, type="continuous")) 
 
+# Scree plot
 n.scree <- ncol(z) - 2
-
 Es <- numeric(n.scree)
+for(i in 1:n.scree){ 
+  kpres <- kproto(z, k = i, nstart = 5, verbose = FALSE) 
+  Es[i] <- kpres$tot.withinss
+  } 
 
-for (i in 1:n.scree) {
-    kpres <- kproto(z, k = i, nstart = 5, verbose = FALSE)
-    Es[i] <- kpres$tot.withinss
-}
+plot(1:n.scree, Es[1:4], type="b", ylab = "Objective Function",
+     xlab = "# Clusters", main="ScreePlot") #figure2
 
-plot(1:n.scree, Es[1:3], type = "b", ylab = "Objective Function",
-     xlab = "# Clusters", main = "Scree Plot")
-
+# Add with three clusters
+group1.9$cluster3 <- kpres3$cluster
 
 ```
 
@@ -388,6 +377,12 @@ plot(1:n.scree, Es[1:3], type = "b", ylab = "Objective Function",
 ## e. Optional: You may want to make a design matrix that that includes only the independent variables you want in the model and drops the id variables such as zip code and Complaint ID. 
 ## f. You may add Clusters and principal components from other variables if you think it will help. 
 ## g. You are absolutely allowed to add additional variables from other public sources to your dataset. This is in no way required. 
+```{r}
+# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, pct_female, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date
+group2.0 <- group1.9[,-c(3:4, 6, 10, 13, 16, 19, 22:24, 102, 108, 112, 123, 135, 139)]
 
+
+
+```
 
 
