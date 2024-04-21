@@ -13,7 +13,7 @@ rm(list = ls())
 knitr::opts_chunk$set(echo = TRUE)
 
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson, caret)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -120,15 +120,6 @@ group1.4 <- group1.3 %>%
   group_by(State) %>%
   mutate(imp_zip = ifelse(missing_zip == TRUE, Mode(ZIP.code),  ZIP.code))
 
-# Could use rfImpute to impute the incorrect zip codes, but would need to convert the wrong ones into NAs
-# group1.4.rf <- group1.3 %>%
-#   mutate(Consumer.complaint.narrative = case_when(is.na(Consumer.complaint.narrative) == TRUE ~ "N/A", is.na(Consumer.complaint.narrative) == FALSE ~ Consumer.complaint.narrative), ZIP.code = ifelse(missing_zip == TRUE, NA, ZIP.code)) %>%
-#   select(-c(COUNTYNAME, STCOUNTYFP))
-# 
-# group1.4.rf2 <- group1.4.rf %>%
-#   mutate(ZIP.code = as.factor(ZIP.code)) %>%
-#   group_by(State) %>%
-#   rfImpute(relief ~., group1.4.rf)
 ```
 
 ## d.	Please indicate any limitations or biases your imputation has on the analysis? 
@@ -238,15 +229,15 @@ census3 <- merge(census_total, censusyoungsum, by = "STCOUNTY")
 census4 <- merge(census3, censusoldsum, by = "STCOUNTY")
 
 # Creating variables to indicate bias
-census4$pct_old <- (census4$OLD_FEMALE + census4$OLD_MALE)/census4$TOT_POP
-census4$pct_young <- (census4$YOUTH_FEMALE + census4$YOUTH_MALE)/census4$TOT_POP
-census4$pct_blk <- (census4$BA_FEMALE + census4$BA_MALE)/census4$TOT_POP
-census4$pct_asian <- (census4$AA_FEMALE + census4$AA_MALE)/census4$TOT_POP
-census4$pct_native <- (census4$IA_FEMALE + census4$IA_MALE)/census4$TOT_POP
-census4$pct_his <- (census4$H_FEMALE + census4$H_MALE)/census4$TOT_POP
-census4$pct_women <- census4$TOT_FEMALE/census4$TOT_POP
+census4$pct_old <- (census4$OLD_FEMALE + census4$OLD_MALE)/census4$TOT_POP_MEAN
+census4$pct_young <- (census4$YOUTH_FEMALE + census4$YOUTH_MALE)/census4$TOT_POP_MEAN
+census4$pct_blk <- (census4$BA_FEMALE_MEAN + census4$BA_MALE_MEAN)/census4$TOT_POP_MEAN
+census4$pct_asian <- (census4$AA_FEMALE_MEAN + census4$AA_MALE_MEAN)/census4$TOT_POP_MEAN
+census4$pct_native <- (census4$IA_FEMALE_MEAN + census4$IA_MALE_MEAN)/census4$TOT_POP_MEAN
+census4$pct_hisp <- (census4$H_FEMALE_MEAN + census4$H_MALE_MEAN)/census4$TOT_POP_MEAN
+census4$pct_women <- census4$TOT_FEMALE_MEAN/census4$TOT_POP_MEAN
 
-# Share of ederly population in America in 2020 was 16.8%, if a county has over this threshold, it is considered to be an older county
+# Share of elderly population in America in 2020 was 16.8%, if a county has over this threshold, it is considered to be an older county
 census4$COUNTY_OLD <- ifelse(census4$pct_old > 0.168, 1, 0)
 
 ```
@@ -259,8 +250,8 @@ group1.8 <- merge(group1.7, census4, by.x = "fips", by.y = "STCOUNTY")
 # Create a flag for servicemembers and older Americans
 group1.8$service_mem <- ifelse(grepl("Servicemember", group1.8$Tags), 1, 0)
 group1.8$old <- ifelse(grepl("Older American", group1.8$Tags), 1, 0)
-group1.8$old_service_mem <- ifelse(grepl("Older American, Servicemember", group1.9$Tags), 1, 0)
-group1.8$none <- ifelse(grepl("None", group1.9$Tags), 1, 0)
+group1.8$old_service_mem <- ifelse(grepl("Older American, Servicemember", group1.8$Tags), 1, 0)
+group1.8$none <- ifelse(grepl("None", group1.8$Tags), 1, 0)
 
 ```
 
@@ -349,9 +340,9 @@ kpres2
 kpres3 <-kproto(x=z,k=3)
 kpres3
 
-# Plots
-clprofiles(kpres2, z, col=wes_palette("Royal1",2, type="continuous")) 
-clprofiles(kpres3, z, col=wes_palette("Royal1",2, type="continuous")) 
+# # Plots
+# clprofiles(kpres2, z, col=wes_palette("Royal1",2, type="continuous")) 
+# clprofiles(kpres3, z, col=wes_palette("Royal1",2, type="continuous")) 
 
 # Scree plot
 n.scree <- ncol(z) - 2
@@ -375,14 +366,73 @@ group1.9$cluster3 <- kpres3$cluster
 ## c. Check the measurement of each variable (i.e. Should date be measure, by day or year?) Should something be logged? 
 ## d. Check all the factors to make sure they have enough observations at each level. 
 ## e. Optional: You may want to make a design matrix that that includes only the independent variables you want in the model and drops the id variables such as zip code and Complaint ID. 
-## f. You may add Clusters and principal components from other variables if you think it will help. 
+## f. You may add Clusters and principal components from other variables if you think it will help.
 ## g. You are absolutely allowed to add additional variables from other public sources to your dataset. This is in no way required. 
 ```{r}
-# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, pct_female, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date
-group2.0 <- group1.9[,-c(3:4, 6, 10, 13, 16, 19, 22:24, 102, 108, 112, 123, 135, 139)]
+# Turn some variables into factors
+lapply(group1.9, is.factor)
+group1.9$Sub.product <- as.factor(group1.9$Sub.product)
+group1.9$Sub.issue <- as.factor(group1.9$Sub.issue)
+group1.9$Issue <- as.factor(group1.9$Issue)
+group1.9$Company.public.response <- as.factor(group1.9$Company.public.response)
+group1.9$Submitted.via <- as.factor(group1.9$Submitted.via)
+group1.9$Timely.response. <- as.factor(group1.9$Timely.response.)
+group1.9$Consumer.disputed. <- as.factor(group1.9$Consumer.disputed.)
+group1.9$cluster3 <- as.factor(group1.9$cluster3)
 
+# Check factor levels before removing variables
+nlevels(as.factor(group1.9$Company)) # over 2000 levels with very few obs. per level
 
+# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, pct_female, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
+group2.0 <- group1.9[,-c(3:4, 6, 10, 12:13, 16, 19, 22:24, 102, 108, 112, 123, 135, 139)]
+
+# Extract year from date received
+group2.0$year <- format(as.Date(group2.0$Date.received, format="%m/%d/%y"),"%y")
+group2.0$year <- paste0("20", group2.0$year)
+
+##### WHAT CENSUS VARS DO WE WANT TO KEEP
+# Keep the percentage of non-Hispanic white Americans
+group2.0$pct_non_hisp_white <- (group2.0$NHWA_FEMALE_MEAN + group2.0$NHWA_MALE_MEAN)/group2.0$TOT_POP_MEAN
+
+# Drop most of the Census variables, date received (because we have the year now)
+group2.1 <- group2.0[, -c(3, 14:90, 100:101)]
 
 ```
 
+# 10. Using k-fold cross validation, determine the best machine learning model to predict debt relief. At minimum you must run: 
+## a.	A linear probability model (can be OLS, ridge, lasso, …) 
+## b.	A logistic model
+## c.	A CART / regression tree
+## d.	Random Forest
+## e.	Gradient Boosting/ XGBoost
+```{r, results = FALSE}
+# LASSO
+
+set.seed(182654)
+x <- model.matrix(group2.1$relief ~ ., group2.1[,-c(1:2)])
+y <- group2.1$relief
+train <- sample(1:nrow(x), nrow(x) / 2)
+test <- (-train)
+y.test <- y[test]
+grid <- 10^seq(10, -2, length = 100)
+
+# Run model
+lasso.glm <- glmnet(x[train,], y[train], alpha = 1, lambda = grid, thresh = 1e-12)
+plot(lasso.glm)
+
+# Run cross validation to find the best lambda
+lasso.cv.out <- cv.glmnet(x[train,], y[train], alpha = 1)
+plot(lasso.cv.out)
+bestlam.lasso <- lasso.cv.out$lambda.min
+bestlam.lasso
+
+# Predict using the best lambda
+lasso.pred <- predict(lasso.glm, s = bestlam.lasso, newx = x[test,])
+mse.lasso <- mean((lasso.pred - y.test)^2) # 0.116155
+
+# What variables should we take out?
+predict(lasso.glm, type = "coef", s = bestlam.lasso)
+
+
+```
 
