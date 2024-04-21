@@ -291,9 +291,9 @@ debt_subset2.imp <- na.roughfix(debt_subset2)
 debt_matrix <- cor(debt_subset2.imp[,-c(26)])
 ggcorrplot(debt_matrix)
 
-# Perform PCA on 5 MOST correlated variables (SwmdicA, SwadicA, AhiWc, AhiCoc, AhiA)
-top_corr_matrix <- cor(debt_subset2.imp[,c(1, 7, 23:25)])
-top_corr_sub <- debt_subset2.imp[,c(1, 7, 23:25)]
+# Perform PCA on 5 MOST correlated variables (SwmdicWc, SwmdicA, SwadicA, AhiWc, AhiCoc, AhiA)
+top_corr_matrix <- cor(debt_subset2.imp[,c(1, 3, 7, 9, 23:25)])
+top_corr_sub <- debt_subset2.imp[,c(1, 3, 7, 9, 23:25)]
 
 # Perform PCA
 debt_pca <- prcomp(top_corr_sub, scale = TRUE)
@@ -304,7 +304,7 @@ scores <- debt_pca$x
 
 # Merge back on to imputed county debt data
 county_debt1 <- cbind(county_debt[,1:3], debt_subset2.imp)
-county_debt1 <- county_debt1[, -c(4, 10, 26:28)]
+county_debt1 <- county_debt1[, -c(4, 6, 10, 12, 26:28)]
 county_debt1 <- cbind(county_debt1, scores[, 1:2])
 
 # Merge back with the rest of the data
@@ -323,14 +323,14 @@ group1.9$medical_debt <- ifelse(group1.9$Sub.product == "Medical debt", 1, 0)
 
 z <- group1.9[, c("medical_debt", "old_service_mem",
                 "pct_old", "Sopoc",
-                "SoslhwsldidA", "pct_women")]
+                "SoslhwsldidA", "Consumer.disputed.")]
 
 z[,1]<- as.factor(z[,1])
 z[,2]<- as.factor(z[,2])
 z[,3]<- scale(as.numeric(z[,3]))
 z[,4] <- scale(as.numeric(z[,4]))
 z[,5]<- scale(as.numeric(z[,5]))
-z[,6] <- scale(as.numeric(z[,6]))
+z[,6] <- as.factor(z[,6])
 
 # 2 cluster
 kpres2 <-kproto(x=z,k=2)
@@ -383,19 +383,17 @@ group1.9$cluster3 <- as.factor(group1.9$cluster3)
 # Check factor levels before removing variables
 nlevels(as.factor(group1.9$Company)) # over 2000 levels with very few obs. per level
 
-# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, pct_female, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
-group2.0 <- group1.9[,-c(3:4, 6, 10, 12:13, 16, 19, 22:24, 102, 108, 112, 123, 135, 139)]
+# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, consumer disputed, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
+group2.0 <- group1.9 %>%
+  select(-c(State, ZIP.code, Consumer.disputed., Sopoc, SoslhwsldidA, old_service_mem, medical_debt, Consumer.complaint.narrative, Complaint.ID,
+            Product, COUNTYNAME, STCOUNTYFP, AGEGRP, Company, Date.sent.to.company))
 
 # Extract year from date received
 group2.0$year <- format(as.Date(group2.0$Date.received, format="%m/%d/%y"),"%y")
 group2.0$year <- paste0("20", group2.0$year)
 
-##### WHAT CENSUS VARS DO WE WANT TO KEEP
-# Keep the percentage of non-Hispanic white Americans
-group2.0$pct_non_hisp_white <- (group2.0$NHWA_FEMALE_MEAN + group2.0$NHWA_MALE_MEAN)/group2.0$TOT_POP_MEAN
-
 # Drop most of the Census variables, date received (because we have the year now)
-group2.1 <- group2.0[, -c(3, 14:90, 100:101)]
+group2.1 <- group2.0[, -c(3, 14:90, 102:103)]
 
 ```
 
@@ -406,33 +404,51 @@ group2.1 <- group2.0[, -c(3, 14:90, 100:101)]
 ## d.	Random Forest
 ## e.	Gradient Boosting/ XGBoost
 ```{r, results = FALSE}
-# LASSO
+# LM Stepwise
+lm <- lm(relief ~., data = group2.1[,-c(1:2)])
+lm.step <- step(lm, direction = "both") # AIC = -100872.9
 
+# New dataset with the variables stepwise chose
+group2.2 <- group2.1 %>%
+  select(c(relief, Sub.product, Issue, Sub.issue, Company.public.response, Tags, Consumer.consent.provided., Submitted.via, Timely.response., pct_asian, pct_women, AldrCoc, CcddrA, CcddrCoc, MccddWc, PC1, year))
+
+
+# LOGIT
 set.seed(182654)
-x <- model.matrix(group2.1$relief ~ ., group2.1[,-c(1:2)])
-y <- group2.1$relief
-train <- sample(1:nrow(x), nrow(x) / 2)
-test <- (-train)
-y.test <- y[test]
-grid <- 10^seq(10, -2, length = 100)
+train <- sample(1:nrow(group2.2), nrow(group2.2)/2)
+train.data <- group2.2[train,]
+test.data <- group2.2[-train,]
 
-# Run model
-lasso.glm <- glmnet(x[train,], y[train], alpha = 1, lambda = grid, thresh = 1e-12)
-plot(lasso.glm)
+glm.logit <- glm(relief ~ ., data = train.data, family = binomial(link = "logit"))
 
-# Run cross validation to find the best lambda
-lasso.cv.out <- cv.glmnet(x[train,], y[train], alpha = 1)
-plot(lasso.cv.out)
-bestlam.lasso <- lasso.cv.out$lambda.min
-bestlam.lasso
 
-# Predict using the best lambda
-lasso.pred <- predict(lasso.glm, s = bestlam.lasso, newx = x[test,])
-mse.lasso <- mean((lasso.pred - y.test)^2) # 0.116155
 
-# What variables should we take out?
-predict(lasso.glm, type = "coef", s = bestlam.lasso)
 
+# LASSO
+# set.seed(182654)
+# x <- model.matrix(step_kept_vars$relief ~ ., step_kept_vars)
+# y <- step_kept_vars$relief
+# train <- sample(1:nrow(x), nrow(x) / 2)
+# test <- (-train)
+# y.test <- y[test]
+# grid <- 10^seq(10, -2, length = 100)
+# 
+# # Run model
+# lasso.glm <- glmnet(x[train,], y[train], alpha = 1, lambda = grid, thresh = 1e-12)
+# plot(lasso.glm)
+# 
+# # Run cross validation to find the best lambda
+# lasso.cv.out <- cv.glmnet(x[train,], y[train], alpha = 1)
+# plot(lasso.cv.out)
+# bestlam.lasso <- lasso.cv.out$lambda.min
+# bestlam.lasso # 0.000938566
+# 
+# # Predict using the best lambda
+# lasso.pred <- predict(lasso.glm, s = bestlam.lasso, newx = x[test,])
+# mse.lasso <- mean((lasso.pred - y.test)^2) # 0.1173978
+# 
+# # What variables should we take out?
+# predict(lasso.glm, type = "coef", s = bestlam.lasso)
 
 ```
 
