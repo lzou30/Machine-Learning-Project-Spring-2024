@@ -426,11 +426,11 @@ lm.step <- step(lm, direction = "both") # AIC = -100915.5
 
 # New dataset with the variables stepwise chose less Sub.issue because 
 group2.2 <- group2.1 %>%
-  select(c(relief, Sub.product, Issue, Tags, Consumer.consent.provided., Submitted.via, Timely.response., pct_blk, pct_hisp, pct_women, AldrA, CcddrA, CcddrCoc, Sopoc, PC1, cluster4, year)) %>%
+  select(c(relief, Sub.product, Issue, Consumer.consent.provided., Submitted.via, Timely.response., pct_hisp, pct_women, service_mem, old, none, AldrA, CcddrA, CcddrCoc, Sopoc, PC1, year)) %>%
   mutate(relief = as.factor(relief))
 
 
-### LOGIT
+j### LOGIT
 set.seed(182654)
 train <- sample(1:nrow(group2.2), nrow(group2.2)/2)
 train.data <- group2.2[train,]
