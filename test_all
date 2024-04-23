@@ -213,3 +213,25 @@ table(test_all2.1$Sub.product)
 test_all2.2 <- test_all2.1 %>%
   select(c(relief, Sub.product, Issue, Consumer.consent.provided., Submitted.via, Timely.response., pct_hisp, pct_women, service_mem, old, none, AldrA, CcddrA, CcddrCoc, Sopoc, PC1, year)) %>%
   mutate(relief = as.factor(relief))
+
+
+set.seed(193456)
+test1 <- sample(1:nrow(test_all2.2), 23229)
+
+# XGBOOST
+## Create train and test data set.
+boost.test1 <- test_all2.2[test1,]
+
+# Create model matrices
+xtest1 <- sparse.model.matrix(relief ~ .-1, data = boost.test1) 
+ytest1 <- as.array(boost.test1$relief)
+
+y_pred3 <- predict(xgb.train, xtest1)
+
+# There appears to be a mismatch in one row for whatever reason
+library(data.table)
+random_index <- sample(1:length(ytest1), size = 1)
+ytest1  <- ytest1[-random_index]
+
+confusion_matrix3 <- table(Actual = ytest1, Predicted = ifelse(y_pred3 > 0.5, 1, 0), exclude =NA)
+confusion_matrix3
