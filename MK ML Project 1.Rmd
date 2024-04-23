@@ -456,7 +456,7 @@ cv_model <- cv.glmnet(x[train,], y[train], alpha = 0, family = "binomial")
 lambda <- cv_model$lambda.min
 
 probabilities <- predict(ridge.logit, newx = x[test,], s = lambda, type = "response")
-y_pred <- ifelse(probabilities > 0.5, 1, 0)
+y_pred <- ifelse(probabilities > 0.5, 1, 0) 
 table(y_pred, y[test])
 F1_ridge_logit <- F1_Score(y_pred, y[test]) # 0.9252302
 
@@ -676,6 +676,222 @@ F1_XGB_opt <- F1_Score(ifelse(y_pred2 > 0.5, 1, 0), ytest) # 0.925593
 
 
 
+```
+
+# RUN ON TEST DATA
+```{r}
+test_all <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/test_all.csv")
+test_all1 <- test_all[, c(3:21, 23)]
+
+# Add leading zero
+add_char <- function(x, pos, insert) {      
+  gsub(paste0("^(.{", pos, "})(.*)$"),
+       paste0("\\1", insert, "\\2"),
+       x)
+}
+
+which(nchar(test_all1$ZIP.code) == 4) # no four-digit zip codes
+test_all1.1 <- test_all1 %>%
+  filter(State != "AE" & State != "AP") # Remove non-state observations
+
+# Filter non-US states
+zip_fips_states <- zip_fips %>%
+  filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
+
+# Merge datasets to find odd zip codes
+test_all1.2 <- merge(test_all1.1, zip_fips_states, 
+                       by.x = c("ZIP.code", "State"),
+                       by.y = c("ZIP", "STATE"), all.x = TRUE)
+
+test_all1.2$missing_zip <- as.factor(is.na(test_all1.2$STCOUNTYFP))
+test_all1.2 <- test_all1.2[,-15] # Drop company response to consumer b/c it is perfectly correlated with relief
+
+# Submitted.via
+table(test_all1.2$Submitted.via, test_all1.2$missing_zip)
+test_all1.3 <- test_all1.2 %>%
+  mutate(Submitted.via = case_when(Submitted.via == "Web Referral" ~ "Referral",
+            Submitted.via == "Web" ~ "Web", 
+            Submitted.via == "Referral" ~ "Referral",
+            Submitted.via == "Postal mail" ~ "Postal mail",
+            Submitted.via == "Phone" ~ "Phone",
+            Submitted.via == "Fax" ~ "Fax")) # Recode Web Referral to Referral
+
+
+# Use mode to impute zip code
+test_all1.4 <- test_all1.3 %>%
+  group_by(State) %>%
+  mutate(imp_zip = ifelse(missing_zip == TRUE, Mode(ZIP.code),  ZIP.code))
+
+test_all1.5 <- test_all1.4[,-c(20:21)] # remove COUNTYNAME & STCOUNTYFP
+test_all1.6 <- merge(test_all1.5, zip_fips_states, by.x = c("imp_zip", "State"), by.y = c("ZIP", "STATE")) # merge
+
+# Add a leading zero to the test_all1.6 FIPS code
+test_all1.6$fips <- ifelse(nchar(test_all1.6$STCOUNTYFP) == 4, add_char(x = test_all1.6$STCOUNTYFP,
+                                                                     pos = 0, 
+                                                                     insert = "0"), test_all1.6$STCOUNTYFP)
+
+# Merge county debt data with test_all1.6
+test_all1.7 <- merge(test_all1.6, county_debt, by = "fips", all.x = TRUE)
+
+# Merge debt data with Census data
+test_all1.8 <- merge(test_all1.7, census4, by.x = "fips", by.y = "STCOUNTY")
+
+# Create a flag for servicemembers and older Americans
+test_all1.8$service_mem <- ifelse(grepl("Servicemember", test_all1.8$Tags), 1, 0)
+test_all1.8$old <- ifelse(grepl("Older American", test_all1.8$Tags), 1, 0)
+test_all1.8$old_service_mem <- ifelse(grepl("Older American, Servicemember", test_all1.8$Tags), 1, 0)
+test_all1.8$none <- ifelse(grepl("None", test_all1.8$Tags), 1, 0)
+
+# Create a subset of debt collection
+debt_subset <- county_debt[, -c(1,2,3)]
+
+# Abbreviate the names of the variables
+colnames(debt_subset) <- abbreviate(colnames(debt_subset), minlength = 4)
+
+# Make all variables numeric
+debt_subset2 <- debt_subset %>%
+  sapply(as.numeric) %>%
+  as.data.frame()
+
+# Get percentage of missing values per variable
+num_missing2 <- colSums(is.na(debt_subset2))
+pct_missing2 <- as.data.frame(num_missing2/nrow(debt_subset2))
+colnames(pct_missing2) <- "pct_missing"
+pct_missing2 <- rownames_to_column(pct_missing2, var = "var_name")
+
+# Create a variable to indicate missing values
+debt_subset2$is_complete <- as.factor(complete.cases(debt_subset2))
+
+# Can't have a correlation matrix with NAs, must impute
+debt_subset2.imp <- na.roughfix(debt_subset2)
+
+# Get the correlation matrix
+debt_matrix <- cor(debt_subset2.imp[,-c(26)])
+ggcorrplot(debt_matrix)
+
+# Perform PCA on 5 MOST correlated variables (SwmdicWc, SwmdicA, SwadicA, AhiWc, AhiCoc, AhiA)
+top_corr_matrix <- cor(debt_subset2.imp[,c(1, 3, 7, 9, 23:25)])
+top_corr_sub <- debt_subset2.imp[,c(1, 3, 7, 9, 23:25)]
+
+# Perform PCA
+debt_pca <- prcomp(top_corr_sub, scale = TRUE)
+summary(debt_pca)
+fviz_eig(debt_pca, addlabels = TRUE)
+loadings <- debt_pca$rotation
+scores <- debt_pca$x
+
+# Merge back on to imputed county debt data
+county_debt1 <- cbind(county_debt[,1:3], debt_subset2.imp)
+county_debt1 <- county_debt1[, -c(4, 6, 10, 12, 26:28)]
+county_debt1 <- cbind(county_debt1, scores[, 1:2])
+
+# Merge back with the rest of the data
+test_all1.9 <- test_all1.8[,-c(25:51)]
+test_all1.9 <- merge(test_all1.9, county_debt1, by = "fips", all.x = TRUE)
+
+# Make binary variable out of Sub product == Medical Debt
+test_all1.9$medical_debt <- ifelse((test_all1.9$Sub.product == "Medical debt" | test_all1.9$Sub.product == "Medical"), 1, 0)
+
+z <- test_all1.9[, c("medical_debt", "old_service_mem",
+                "pct_old", "pct_young",
+                "SoslhwsldidA", "Consumer.disputed.")]
+
+z[,1]<- as.factor(z[,1])
+z[,2]<- as.factor(z[,2])
+z[,3]<- scale(as.numeric(z[,3]))
+z[,4] <- scale(as.numeric(z[,4]))
+z[,5]<- scale(as.numeric(z[,5]))
+z[,6] <- as.factor(z[,6])
+
+# 2 cluster
+kpres2 <-kproto(x=z,k=2)
+kpres2
+
+# 3 cluster
+kpres3 <-kproto(x=z,k=3)
+kpres3
+
+# 4 cluster
+kpres4 <-kproto(x=z,k=4)
+kpres4
+
+# Scree plot
+n.scree <- ncol(z) - 2
+Es <- numeric(n.scree)
+for(i in 1:n.scree){ 
+  kpres <- kproto(z, k = i, nstart = 5, verbose = FALSE) 
+  Es[i] <- kpres$tot.withinss
+  } 
+
+plot(1:n.scree, Es[1:4], type = "b", ylab = "Objective Function",
+     xlab = "# Clusters", main = "ScreePlot")
+
+# Add with three clusters
+test_all1.9$cluster4 <- kpres4$cluster
+
+
+# Turn some variables into factors
+lapply(test_all1.9, is.factor)
+test_all1.9$Sub.product <- as.factor(test_all1.9$Sub.product)
+test_all1.9$Sub.issue <- as.factor(test_all1.9$Sub.issue)
+test_all1.9$Issue <- as.factor(test_all1.9$Issue)
+test_all1.9$Company.public.response <- as.factor(test_all1.9$Company.public.response)
+test_all1.9$Submitted.via <- as.factor(test_all1.9$Submitted.via)
+test_all1.9$Timely.response. <- as.factor(test_all1.9$Timely.response.)
+test_all1.9$Consumer.disputed. <- as.factor(test_all1.9$Consumer.disputed.)
+test_all1.9$cluster4 <- as.factor(test_all1.9$cluster4)
+
+# Check factor levels before removing variables
+nlevels(as.factor(test_all1.9$Company)) # over 2000 levels with very few obs. per level
+
+# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, consumer disputed, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
+test_all2.0 <- test_all1.9 %>%
+  select(-c(State, ZIP.code, Sub.issue, Company.public.response, Consumer.disputed., pct_young, SoslhwsldidA, old_service_mem, medical_debt, Consumer.complaint.narrative, COUNTYNAME, STCOUNTYFP, Complaint.ID, Product, AGEGRP, Company, Date.sent.to.company, Tags))
+
+# Extract year from date received
+test_all2.0$year <- format(as.Date(test_all2.0$Date.received, format="%m/%d/%y"),"%y")
+test_all2.0$year <- paste0("20", test_all2.0$year)
+
+# Drop most of the Census variables, date received (because we have the year now)
+test_all2.1 <- test_all2.0[, -c(1:3, 12:88, 99:100)]
+
+# Recode levels of subproduct
+test_all2.1 <- test_all2.1 %>%
+  mutate(Sub.product = case_when(Sub.product == "Auto" ~ "Auto debt",
+                                 Sub.product == "Credit card" ~ "Credit card debt",
+                                 Sub.product == "Federal student loan" ~ "Federal student loan debt",
+                                 Sub.product == "Mortgage" ~ "Mortgage debt",
+                                 Sub.product == "Other (i.e. phone, health club, etc.)" ~ "Other debt",
+                                 Sub.product == "Payday loan" ~ "Payday loan debt",
+                                 Sub.product == "Medical" ~ "Medical debt",
+                                 .default = Sub.product))
+table(test_all2.1$Sub.product)
+
+
+test_all2.2 <- test_all2.1 %>%
+  select(c(relief, Sub.product, Issue, Consumer.consent.provided., Submitted.via, Timely.response., pct_hisp, pct_women, service_mem, old, none, AldrA, CcddrA, CcddrCoc, Sopoc, PC1, year)) %>%
+  mutate(relief = as.factor(relief))
+
+
+test_all2.2$relief <- as.factor(test_all2.2$relief)
+class_xtest <- sparse.model.matrix(relief ~ .-1, data = test_all2.2)
+class_ytest <- as.array(test_all2.2$relief)
+y_class_pred <- predict(xgb.train, class_xtest)
+y_class_pred2 <- as.numeric(y_class_pred)
+class_ytest2 <- as.numeric(as.character(class_ytest[-c(1:2)]))
+confusion_matrix3 <- table(Actual = class_ytest2, Predicted = ifelse(y_class_pred2 > 0.5, 1, 0))
+confusion_matrix3
+
+accuracy_rate <- (37807+57)/(37807+121+57+5915)
+accuracy_rate
 
 ```
+
+# 11. Compare and contrast the models you decide to run. Choose the model you think is optimal and explain why? 
+## a.	Do they meet the assumptions of the model? 
+## b.	Can they be interpreted? 
+## c.	Which has the best fit? 
+
+# 12.	After picking the best model, drop one variable. The dummy variable for Older American you made from the original data set tags and rerun. Does the aggregated older American percentages from the Census data provide the same level of details and predictive accuracy as the micro data provided by the original dataset? Do you think these results are representative of other demographic characteristics. 
+
 
