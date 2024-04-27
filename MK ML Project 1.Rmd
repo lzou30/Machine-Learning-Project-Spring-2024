@@ -13,7 +13,7 @@ rm(list = ls())
 knitr::opts_chunk$set(echo = TRUE)
 
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson, caret, rpart.plot, xgboost, reshape2, MLmetrics, SHAPforxgboost, ROSE, ineq, catboost)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson, caret, rpart.plot, xgboost, reshape2, MLmetrics, SHAPforxgboost, ROSE, DiagrammeR)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -300,7 +300,7 @@ group1.8$none <- ifelse(grepl("None", group1.8$Tags), 1, 0)
 ## d. Suggestion: Examine the percent missing for each variable as you are selecting variables.
 
 ```{r}
-# REDO TO RF DATA INSTEAD
+# Random forest for missing data in the Urban Institute data
 debt_subset_rf <- county_debt[,-(2:3)]
 debt_subset_rf2 <- debt_subset_rf %>%
   sapply(as.numeric) %>%
@@ -369,15 +369,11 @@ z[,6] <- as.factor(z[,6])
 set.seed(19745)
 
 # 2 
-kpres2 <-kproto(x=z,k=2)
+kpres2 <-kproto(x = z,k=2)
 kpres2
 
-# 3 
-kpres3 <-kproto(x=z,k=3)
-kpres3
-
 # 4 
-kpres4 <-kproto(x=z,k=4)
+kpres4 <-kproto(x = z,k=4)
 kpres4
 
 # 5 
@@ -395,7 +391,7 @@ for(i in 1:n.scree){
 plot(1:n.scree, Es[1:6], type = "b", ylab = "Objective Function",
      xlab = "# Clusters", main = "ScreePlot")
 
-# Add with five clusters (based on scree plot)
+# Add with four clusters (based on scree plot)
 group1.9$cluster4 <- kpres4$cluster
 
 ```
@@ -429,7 +425,7 @@ group1.9$cluster4 <- as.factor(group1.9$cluster4)
 # Check factor levels before removing variables
 nlevels(as.factor(group1.9$Company)) # over 2000 levels with very few obs. per level
 
-# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, consumer disputed, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
+# Drop medical debt, old_service_mem, SoslhwsldidA, consumer disputed, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
 group2.0 <- group1.9 %>%
   select(-c(State, ZIP.code, Sub.issue, Company.public.response, Consumer.disputed., pct_young, SoslhwsldidA, old_service_mem, medical_debt, Consumer.complaint.narrative, Complaint.ID, Product, COUNTYNAME, STCOUNTYFP, AGEGRP, Company, Date.sent.to.company, Tags))
 
@@ -483,7 +479,7 @@ group2.2 <- group2.1 %>%
 group2.3 <- ovun.sample(relief ~ ., data = group2.2, method = "over", seed = 182654)
 group2.3 <- as.data.frame(group2.3$data) # coerce to dataframe
 
-### RIDGE LOGIT
+### LOGIT WITH RIDGE REGULARIZATION
 # 5-fold CV
 set.seed(182654)
 train_control <- trainControl(method = "cv", 
@@ -497,26 +493,48 @@ logit.ridge <- train(relief ~., data = default_trn, trControl = train_control,
             method = "glmnet", family = "binomial", tuneGrid = grid,
                      preProcess = c("center", "scale"))
 
+# Prediction
 ridge.predict <- predict(logit.ridge, default_tst)
 table(Predicted = ridge.predict, Actual = default_tst$relief) 
 ridge.accuracy <- (5947 + 6272)/(5947 + 6272 + 4072 + 3702) # 0.6111639
 ridge.F1 <- F1_Score(ridge.predict, default_tst$relief) # 0.6047387
 
-### STEPWISE REGRESSION
+# Get predicted probabilities and plot the QQ plot
+predicted_probs <- predict(logit.ridge, newdata = default_tst, type = "prob")
+predicted_quantiles <- quantile(predicted_probs[,2], probs = seq(0, 1, by = 0.01)) # assuming 2nd column is the probability of positive class
+theoretical_quantiles <- qnorm(seq(0, 1, by = 0.01))
+plot(theoretical_quantiles, predicted_quantiles, 
+     xlab = "Theoretical Quantiles", ylab = "Predicted Quantiles",
+     main = "QQ Plot for Logistic Regression w/ Ridge Model")
+abline(0, 1, col = "red")
+
+### OLS & STEPWISE REGRESSION
+# OLS
 set.seed(182654)
 default_trn$relief <- as.numeric(as.character(default_trn$relief))
 default_tst$relief <- as.numeric(as.character(default_tst$relief))
 
 lm <- train(relief~., data = default_trn, trControl = train_control,
-            method = "leapSeq")
+            method = "lm")
 
 lm.predict <- predict(lm, default_tst)
 lm.predict <- round(lm.predict, 0)
 table(Predicted = lm.predict, Actual = default_tst$relief)
-lm.accuracy <- (7319 + 3726)/(7319 + 3726 + 2700 + 6248) # 0.5524434
-lm.F1 <- F1_Score(lm.predict, default_tst$relief) # 0.6206224
+lm.accuracy <- (5969 + 6265)/(5969 + 6265 + 4050 + 3709) # 0.6119142
+lm.F1 <- F1_Score(lm.predict, default_tst$relief) # 0.6060821
 lm.residuals <- residuals(lm$finalModel) # get the residuals
 qqnorm(lm.residuals) # qqplot of the residuals; clearly not Normal, but I wouldn't expect it to be
+
+
+# STEPWISE
+lm.step <- train(relief~., data = default_trn, trControl = train_control,
+            method = "leapSeq")
+
+lm.step.predict <- predict(lm.step, default_tst)
+lm.step.predict <- round(lm.step.predict, 0)
+table(Predicted = lm.step.predict, Actual = default_tst$relief)
+lm.step.accuracy <- (7281 + 4128)/(7281 + 4128 + 2738 + 5846) # 0.5706497
+lm.step.F1 <- F1_Score(lm.step.predict, default_tst$relief) # 0.6291368
 
 ### CART/REGRESSION TREE
 set.seed(182654)
@@ -542,13 +560,11 @@ default_tst$relief <- as.factor(default_tst$relief)
 relief.rf <- train(relief ~., data = default_trn, 
                    method = "rf",
                    trControl = train_control, ntree = 100)
-
 relief.rf
-plot(relief.rf)
 rf.predict <- predict(relief.rf, default_tst, method = "class")
 table(Predicted = rf.predict, Actual = default_tst$relief)
-rf.accuracy <- (8370 + 9687)/(8370 + 9687 + 1649 + 287) # 0.9031661
-rf.F1 <- F1_Score(rf.predict, default_tst$relief) # 0.8963375
+rf.accuracy <- (8371 + 9686)/(8371 + 9686 + 1648 + 288) # 0.9031661
+rf.F1 <- F1_Score(rf.predict, default_tst$relief) # 0.8963486
 
 ### XGBOOST
 # Run a XGBoost model with the default parameters.
@@ -591,7 +607,7 @@ gamma = c(0.1, 1, 10, 100)
 ### Eta search
 set.seed(13856) 
 conv_eta = matrix(NA,500,length(eta)) 
-pred_eta = matrix(NA,nrow(boost.test), length(eta))
+pred_eta = matrix(NA,nrow(default_tst), length(eta))
 colnames(conv_eta) = colnames(pred_eta) = eta 
 for(i in 1:length(eta)){ 
   params=list(eta = eta[i], colsample_bylevel=cs[standard[2]], 
@@ -611,7 +627,7 @@ ggplot(data = conv_eta) + geom_line(aes(x = iter, y = value, color = variable))
 # colsample_bylevel 
 set.seed(1284654) 
 conv_cs = matrix(NA,500,length(cs)) 
-pred_cs = matrix(NA,nrow(boost.test), length(cs)) 
+pred_cs = matrix(NA,nrow(default_tst), length(cs)) 
 colnames(conv_cs) = colnames(pred_cs) = cs 
 for(i in 1:length(cs)){ 
   params = list(eta = eta[standard[1]], colsample_bylevel = cs[i], 
@@ -632,7 +648,7 @@ ggplot(data = conv_cs) + geom_line(aes(x = iter, y = value, color = variable))
 ## Max Depth 
 set.seed(1284654) 
 conv_md=matrix(NA,500,length(md)) 
-pred_md=matrix(NA,nrow(boost.test),length(md)) 
+pred_md=matrix(NA,nrow(default_tst),length(md)) 
 colnames(conv_md)=colnames(pred_md)=md 
 for(i in 1:length(md)){ 
   params=list(eta=eta[standard[1]],
@@ -652,7 +668,7 @@ ggplot(data=conv_md)+geom_line(aes(x=iter,y=value,color=variable))
 ## sub_sample 
 set.seed(1284654) 
 conv_ss=matrix(NA,500,length(ss)) 
-pred_ss=matrix(NA,nrow(boost.test),length(ss)) 
+pred_ss=matrix(NA,nrow(default_tst),length(ss)) 
 colnames(conv_ss)=colnames(pred_ss)=ss 
 for(i in 1:length(ss)){ 
   params=list(eta=eta[standard[1]], 
@@ -673,7 +689,7 @@ ggplot(data=conv_ss)+geom_line(aes(x=iter,y=value,color=variable))
 ## min_child_weight 
 set.seed(12754) 
 conv_mcw = matrix(NA,500,length(mcw)) 
-pred_mcw = matrix(NA,nrow(boost.test), length(mcw)) 
+pred_mcw = matrix(NA,nrow(default_tst), length(mcw)) 
 colnames(conv_mcw) = colnames(pred_mcw) = mcw 
 for(i in 1:length(mcw)){ 
   params = list(eta = 0.5, colsample_bylevel=1, 
@@ -693,10 +709,10 @@ ggplot(data = conv_mcw) + geom_line(aes(x = iter, y = value, color = variable))
 ### Gamma
 set.seed(12897564) 
 conv_gamma = matrix(NA,500,length(gamma)) 
-pred_gamma = matrix(NA,nrow(boost.test), length(gamma)) 
+pred_gamma = matrix(NA,nrow(default_tst), length(gamma)) 
 colnames(conv_gamma) = colnames(pred_gamma) = gamma 
 for(i in 1:length(gamma)){ 
-  params = list(eta = 0.2, colsample_bylevel=1, 
+  params = list(eta = 0.5, colsample_bylevel=1, 
                 subsample = 0.75, max_depth = 10, min_child_weight = 1, 
                 gamma = gamma[i]) 
   xgb = xgboost(xtrain, label = ytrain, nrounds = 500, params = params) 
@@ -727,7 +743,7 @@ importance_matrix <- xgb.importance(model = xgb2)
 xgb.plot.importance(importance_matrix, xlab = "Feature Importance")
 
 # Plot a few trees to see interactions
-# xgb.plot.tree(model = xgb2, trees = 1)
+# xgb.plot.tree(model = xgb2, trees = 20)
 
 ```
 
