@@ -311,6 +311,12 @@ set.seed(19745) # set random seed
 debt_subset_rf3 <- rfImpute(fips~., debt_subset_rf2[,-27]) # impute using RF
 colnames(debt_subset_rf3) <- abbreviate(colnames(debt_subset_rf3), minlength = 4) # change column names
 
+# Calculate the percent missing for each variable
+num_missing <- colSums(is.na(debt_subset_rf2))
+pct_missing <- as.data.frame(num_missing/nrow(debt_subset_rf2))
+colnames(pct_missing) <- "pct_missing"
+pct_missing <- rownames_to_column(pct_missing, var = "var_name")
+
 # Get correlation by removing fips code
 debt_matrix_rf <- cor(debt_subset_rf3[,-1])
 ggcorrplot(debt_matrix_rf)
@@ -496,6 +502,7 @@ logit.ridge <- train(relief ~., data = default_trn, trControl = train_control,
 ridge.predict <- predict(logit.ridge, default_tst)
 table(Predicted = ridge.predict, Actual = default_tst$relief) 
 ridge.accuracy <- (5947 + 6272)/(5947 + 6272 + 4072 + 3702) # 0.6111639
+ridge.spec <- 6287/(6287 + 3687) # 0.6303389
 ridge.F1 <- F1_Score(ridge.predict, default_tst$relief) # 0.6047387
 
 # Get predicted probabilities and plot the QQ plot
@@ -509,17 +516,18 @@ abline(0, 1, col = "red")
 
 ### OLS & STEPWISE REGRESSION
 # OLS
-set.seed(182654)
 default_trn$relief <- as.numeric(as.character(default_trn$relief))
 default_tst$relief <- as.numeric(as.character(default_tst$relief))
 
 lm <- train(relief~., data = default_trn, trControl = train_control,
             method = "lm")
 
+# Prediction
 lm.predict <- predict(lm, default_tst)
 lm.predict <- round(lm.predict, 0)
 table(Predicted = lm.predict, Actual = default_tst$relief)
 lm.accuracy <- (5969 + 6265)/(5969 + 6265 + 4050 + 3709) # 0.6119142
+lm.spec <- 6289/(6289+3685) # 0.6305394
 lm.F1 <- F1_Score(lm.predict, default_tst$relief) # 0.6060821
 lm.residuals <- residuals(lm$finalModel) # get the residuals
 qqnorm(lm.residuals) # qqplot of the residuals; clearly not Normal, but I wouldn't expect it to be
@@ -549,6 +557,7 @@ relief.tree$finalModel$variable.importance # plot variable importance
 tree.predict <- predict(relief.tree, default_tst) 
 table(Predicted = tree.predict, Actual = default_tst$relief)
 tree.accuracy <- (7165 + 5055)/(7165 + 5055 + 2854 + 4919) # 0.6112139
+tree.spec <- 5087/(5087 + 4887) # 0.5100261
 tree.F1 <- F1_Score(tree.predict, default_tst$relief) # 0.6483283
 
 ### RANDOM FOREST
@@ -559,9 +568,12 @@ relief.rf <- train(relief ~., data = default_trn,
                    method = "rf",
                    trControl = train_control, ntree = 100)
 relief.rf
+
+# Prediction
 rf.predict <- predict(relief.rf, default_tst, method = "class")
 table(Predicted = rf.predict, Actual = default_tst$relief)
 rf.accuracy <- (8364 + 9701)/(8364 + 9701 + 1655 + 273) # 0.9035662
+rf.spec <- 9701/(9701 + 273) # 0.9726288
 rf.F1 <- F1_Score(rf.predict, default_tst$relief) # 0.8966552
 
 # Get importance frame
@@ -575,7 +587,7 @@ min_depth_plot <- plot_min_depth_distribution(min_depth_frame)
 min_depth_plot
 
 # Plot multiway importance plot
-multi_import <- plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+multi_import <- plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes", no_of_labels = 5)
 multi_import
 
 # Run an interaction plot
@@ -583,7 +595,7 @@ imp_vars <- important_variables(importance_frame, k = 5, measures = c("mean_min_
 interactions_frame <- min_depth_interactions(relief.rf$finalModel, imp_vars)
 head(interactions_frame[order(interactions_frame$occurrences, decreasing = TRUE),])
 plot_min_depth_interactions(interactions_frame)
-plot_min_depth_interactions(interactions_frame[which(interactions_frame$variable == "pct_women"),]) # plot what pct_women interacts with
+plot_min_depth_interactions(interactions_frame[which(interactions_frame$variable == "pct_women"),]) # plot what pct_women interacts with, specifically
 
 ### XGBOOST
 # Run a XGBoost model with the default parameters
@@ -755,6 +767,7 @@ xgb2 <- xgboost(data = xtrain, label = as.numeric(ytrain) - 1, params = params,
 boost.predict2 <- predict(xgb2, xtest) 
 table(Predicted = ifelse(boost.predict2 > 0.5, 1, 0), Actual = ytest)
 boost.accuracy2 <-  (8255 + 9594)/(8255 + 9594 + 1764 + 380) # 0.8927625 (eta = 0.5, colsample_bylevel = 1, subsample = 0.75 , max_depth = 10, min_child_weight = 1, gamma = 0.1)
+boost.spec <- 9594/(9594 + 380) # 0.9619009
 boost.F1.2 <- F1_Score(ifelse(boost.predict2 > 0.5, 1, 0), ytest) # 0.8850649
 
 # Get importance matrix
