@@ -1,8 +1,8 @@
 ---
-title: "ML Project Group 1"
+title: "ML Project - Group 1"
 author: "Morgan Kleidon"
-date: "2024-03-30"
-output: html_document
+date: "2024-04-28"
+output: word_document
 ---
 
 ```{r setup, include = FALSE}
@@ -13,7 +13,7 @@ rm(list = ls())
 knitr::opts_chunk$set(echo = TRUE)
 
 # Load packages
-pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson, caret, rpart.plot, xgboost, reshape2, MLmetrics, SHAPforxgboost, ROSE, DiagrammeR)
+pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson, caret, rpart.plot, xgboost, reshape2, MLmetrics, SHAPforxgboost, ROSE, DiagrammeR, randomForestExplainer)
 
 # Set custom theme
 MK_theme <-   theme(text = element_text(family = "Times New Roman"),
@@ -196,7 +196,7 @@ group1.7 <- merge(group1.6, county_debt, by = "fips", all.x = TRUE)
 
 ## e. Also, from the original CFPB dataset create dummy variables for Service Members and Older American based on the Tags column.
 
-```{r}
+```{r, results = FALSE}
 # Read in Census data
 census <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/cc-est2022-all.csv")
 colnames(census)
@@ -412,7 +412,7 @@ group1.9$cluster4 <- kpres4$cluster
 
 ## g. You are absolutely allowed to add additional variables from other public sources to your dataset. This is in no way required.
 
-```{r}
+```{r, results = FALSE}
 # Turn some variables into factors
 lapply(group1.9, is.factor)
 group1.9$Sub.product <- as.factor(group1.9$Sub.product)
@@ -475,19 +475,18 @@ group2.2 <- group2.1 %>%
   select(-c(pct_hisp, pct_asian, pct_blk, pct_native, MdicWc, CcddrWc, AldrWc, MccddWc, SoslhwsldidWc, SwadicCoc, MdicCoc, AldrCoc, CcddrCoc, MccddCoc, SoslhwsldidCoc)) %>%
   mutate(relief = as.factor(relief))
 
-# Oversample the data 
+# Oversample the data and create a test and train
 group2.3 <- ovun.sample(relief ~ ., data = group2.2, method = "over", seed = 182654)
 group2.3 <- as.data.frame(group2.3$data) # coerce to dataframe
 
-### LOGIT WITH RIDGE REGULARIZATION
-# 5-fold CV
 set.seed(182654)
-train_control <- trainControl(method = "cv", 
-                              number = 5)
 default_idx = createDataPartition(group2.3$relief, p = 0.75, list = FALSE) # use 75% of data in training
 default_trn = group2.3[default_idx, ] # partition into train
 default_tst = group2.3[-default_idx, ] # partition into test
+train_control <- trainControl(method = "cv", 
+                              number = 5) # 5 fold CV
 
+### LOGIT WITH RIDGE REGULARIZATION
 grid <- expand.grid(alpha = 0, lambda = seq(0.0001, 1, length = 100))
 logit.ridge <- train(relief ~., data = default_trn, trControl = train_control, 
             method = "glmnet", family = "binomial", tuneGrid = grid,
@@ -524,7 +523,6 @@ lm.accuracy <- (5969 + 6265)/(5969 + 6265 + 4050 + 3709) # 0.6119142
 lm.F1 <- F1_Score(lm.predict, default_tst$relief) # 0.6060821
 lm.residuals <- residuals(lm$finalModel) # get the residuals
 qqnorm(lm.residuals) # qqplot of the residuals; clearly not Normal, but I wouldn't expect it to be
-
 
 # STEPWISE
 lm.step <- train(relief~., data = default_trn, trControl = train_control,
@@ -563,11 +561,32 @@ relief.rf <- train(relief ~., data = default_trn,
 relief.rf
 rf.predict <- predict(relief.rf, default_tst, method = "class")
 table(Predicted = rf.predict, Actual = default_tst$relief)
-rf.accuracy <- (8371 + 9686)/(8371 + 9686 + 1648 + 288) # 0.9031661
-rf.F1 <- F1_Score(rf.predict, default_tst$relief) # 0.8963486
+rf.accuracy <- (8364 + 9701)/(8364 + 9701 + 1655 + 273) # 0.9035662
+rf.F1 <- F1_Score(rf.predict, default_tst$relief) # 0.8966552
+
+# Get importance frame
+importance_frame <- measure_importance(relief.rf$finalModel)
+importance_frame 
+
+# Calculate and plot the minimal depth
+min_depth_frame <- min_depth_distribution(relief.rf$finalModel)
+head(min_depth_frame, n = 10)
+min_depth_plot <- plot_min_depth_distribution(min_depth_frame)
+min_depth_plot
+
+# Plot multiway importance plot
+multi_import <- plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+multi_import
+
+# Run an interaction plot
+imp_vars <- important_variables(importance_frame, k = 5, measures = c("mean_min_depth", "no_of_trees"))
+interactions_frame <- min_depth_interactions(relief.rf$finalModel, imp_vars)
+head(interactions_frame[order(interactions_frame$occurrences, decreasing = TRUE),])
+plot_min_depth_interactions(interactions_frame)
+plot_min_depth_interactions(interactions_frame[which(interactions_frame$variable == "pct_women"),]) # plot what pct_women interacts with
 
 ### XGBOOST
-# Run a XGBoost model with the default parameters.
+# Run a XGBoost model with the default parameters
 set.seed(182654)
 xtrain <- sparse.model.matrix(relief ~ .-1, data = default_trn)
 ytrain <- as.array(default_trn$relief)
@@ -579,8 +598,8 @@ xgb1 <- xgboost(data = xtrain, label = as.numeric(ytrain) - 1, nrounds = 100, ob
 # Predictions
 boost.predict <- predict(xgb1, xtest)
 table(Predicted = ifelse(boost.predict > 0.5, 1, 0), Actual = ytest)
-boost.accuracy <- (6939 + 7470)/(6939 + 7470 + 3080 + 2504) # 0.7207022
-boost.F1 <- F1_Score(ifelse(boost.predict > 0.5, 1, 0), ytest) # 0.7130819
+boost.accuracy <- (6944 + 7499)/(6944 + 7499 + 3075 + 2475) # 0.7224028
+boost.F1 <- F1_Score(ifelse(boost.predict > 0.5, 1, 0), ytest) # 0.7144768
 
 ### Perform a grid search for the proper parameters ###
 # = eta candidates = # 
@@ -735,8 +754,8 @@ xgb2 <- xgboost(data = xtrain, label = as.numeric(ytrain) - 1, params = params,
 # Predictions
 boost.predict2 <- predict(xgb2, xtest) 
 table(Predicted = ifelse(boost.predict2 > 0.5, 1, 0), Actual = ytest)
-boost.accuracy2 <-  (8285 + 9577)/(8285 + 9577 + 1734 + 397) # 0.8934127 (eta = 0.5, colsample_bylevel = 1, subsample = 0.75 , max_depth = 10, min_child_weight = 1, gamma = 0.1)
-boost.F1.2 <- F1_Score(ifelse(boost.predict2 > 0.5, 1, 0), ytest) # 0.8860489
+boost.accuracy2 <-  (8255 + 9594)/(8255 + 9594 + 1764 + 380) # 0.8927625 (eta = 0.5, colsample_bylevel = 1, subsample = 0.75 , max_depth = 10, min_child_weight = 1, gamma = 0.1)
+boost.F1.2 <- F1_Score(ifelse(boost.predict2 > 0.5, 1, 0), ytest) # 0.8850649
 
 # Get importance matrix
 importance_matrix <- xgb.importance(model = xgb2)
@@ -747,7 +766,7 @@ xgb.plot.importance(importance_matrix, xlab = "Feature Importance")
 
 ```
 
-# RUN ON TEST DATA (HAS NOT BEEN UPDATED 4/27)
+# RUN ON TEST DATA
 ```{r}
 test_all <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/test_all.csv")
 test_all1 <- test_all[, c(3:21, 23)]
@@ -761,7 +780,7 @@ zip_fips_states <- zip_fips %>%
   filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
 
 # Merge datasets to find odd zip codes
-test_all1.2 <- merge(test_all1.1, zip_fips_states, 
+test_all1.2 <- merge(test_all1.1, zip_fips_states,
                        by.x = c("ZIP.code", "State"),
                        by.y = c("ZIP", "STATE"), all.x = TRUE)
 
@@ -772,7 +791,7 @@ test_all1.2 <- test_all1.2[,-15] # Drop company response to consumer b/c it is p
 table(test_all1.2$Submitted.via, test_all1.2$missing_zip)
 test_all1.3 <- test_all1.2 %>%
   mutate(Submitted.via = case_when(Submitted.via == "Web Referral" ~ "Referral",
-            Submitted.via == "Web" ~ "Web", 
+            Submitted.via == "Web" ~ "Web",
             Submitted.via == "Referral" ~ "Referral",
             Submitted.via == "Postal mail" ~ "Postal mail",
             Submitted.via == "Phone" ~ "Phone",
@@ -789,7 +808,7 @@ test_all1.6 <- merge(test_all1.5, zip_fips_states, by.x = c("imp_zip", "State"),
 
 # Add a leading zero to the test_all1.6 FIPS code
 test_all1.6$fips <- ifelse(nchar(test_all1.6$STCOUNTYFP) == 4, add_char(x = test_all1.6$STCOUNTYFP,
-                                                                     pos = 0, 
+                                                                     pos = 0,
                                                                      insert = "0"), test_all1.6$STCOUNTYFP)
 
 # Merge county debt data with test_all1.6
@@ -805,7 +824,7 @@ test_all1.8$old_service_mem <- ifelse(grepl("Older American, Servicemember", tes
 test_all1.8$none <- ifelse(grepl("None", test_all1.8$Tags), 1, 0)
 
 # Create a subset of debt collection
-debt_subset <- county_debt[, -c(1,2,3)]
+debt_subset <- county_debt[, -c(2,3)]
 
 # Abbreviate the names of the variables
 colnames(debt_subset) <- abbreviate(colnames(debt_subset), minlength = 4)
@@ -814,42 +833,40 @@ colnames(debt_subset) <- abbreviate(colnames(debt_subset), minlength = 4)
 debt_subset2 <- debt_subset %>%
   sapply(as.numeric) %>%
   as.data.frame()
+debt_subset2$is_complete <- as.factor(complete.cases(debt_subset2)) # variable for complete cases
 
-# Get percentage of missing values per variable
-num_missing2 <- colSums(is.na(debt_subset2))
-pct_missing2 <- as.data.frame(num_missing2/nrow(debt_subset2))
-colnames(pct_missing2) <- "pct_missing"
-pct_missing2 <- rownames_to_column(pct_missing2, var = "var_name")
+set.seed(19745) # set random seed
+debt_subset3 <- rfImpute(fips~., debt_subset2[,-27]) # impute using RF
 
-# Create a variable to indicate missing values
-debt_subset2$is_complete <- as.factor(complete.cases(debt_subset2))
+# Get correlation by removing fips code
+debt_matrix_rf2 <- cor(debt_subset3[,-1])
+ggcorrplot(debt_matrix_rf2)
 
-# Can't have a correlation matrix with NAs, must impute
-debt_subset2.imp <- na.roughfix(debt_subset2)
+# Subset variables that will be included in PCA (based on the correlation matrix)
+pca_vars2 <- debt_subset3 %>%
+  select(c(SwadicWc, SwadicA, SwmdicA, SwmdicCoc, SwmdicWc, AhiA, AhiWc, AhiCoc))
 
-# Get the correlation matrix
-debt_matrix <- cor(debt_subset2.imp[,-c(26)])
-ggcorrplot(debt_matrix)
+# Perform PCA on selected variables and save the scores/loadings
+debt_pca_rf2 <- prcomp(pca_vars2, scale = TRUE)
+summary(debt_pca_rf2)
+fviz_eig(debt_pca_rf2, addlabels = TRUE)
+loadings2 <- debt_pca_rf2$rotation
+scores2 <- debt_pca_rf2$x
 
-# Perform PCA on 5 MOST correlated variables (SwmdicWc, SwmdicA, SwadicA, AhiWc, AhiCoc, AhiA)
-top_corr_matrix <- cor(debt_subset2.imp[,c(1, 3, 7, 9, 23:25)])
-top_corr_sub <- debt_subset2.imp[,c(1, 3, 7, 9, 23:25)]
+# Remove variables used in PCA from the dataset and add the principal components
+county_debt1.2 <- debt_subset3 %>%
+  select(-c(SwadicWc, SwadicA, SwmdicA, SwmdicCoc, SwmdicWc, AhiA, AhiWc, AhiCoc))
+county_debt1.2 <- cbind(county_debt1.2, scores2[, 1:2])
 
-# Perform PCA
-debt_pca <- prcomp(top_corr_sub, scale = TRUE)
-summary(debt_pca)
-fviz_eig(debt_pca, addlabels = TRUE)
-loadings <- debt_pca$rotation
-scores <- debt_pca$x
+# Add leading zero to fips before merging back onto rest of data
+county_debt1.2$fips2<- ifelse(nchar(county_debt1.2$fips) == 4, add_char(x = county_debt1.2$fips,
+                                                                     pos = 0,
+                                                                     insert = "0"), county_debt1.2$fips)
 
-# Merge back on to imputed county debt data
-county_debt1 <- cbind(county_debt[,1:3], debt_subset2.imp)
-county_debt1 <- county_debt1[, -c(4, 6, 10, 12, 26:28)]
-county_debt1 <- cbind(county_debt1, scores[, 1:2])
 
 # Merge back with the rest of the data
 test_all1.9 <- test_all1.8[,-c(25:51)]
-test_all1.9 <- merge(test_all1.9, county_debt1, by = "fips", all.x = TRUE)
+test_all1.9 <- merge(test_all1.9, county_debt1.2[,-1], by.x = "fips", by.y = "fips2", all.x = TRUE)
 
 # Make binary variable out of Sub product == Medical Debt
 test_all1.9$medical_debt <- ifelse((test_all1.9$Sub.product == "Medical debt" | test_all1.9$Sub.product == "Medical"), 1, 0)
@@ -865,89 +882,77 @@ z[,4] <- scale(as.numeric(z[,4]))
 z[,5]<- scale(as.numeric(z[,5]))
 z[,6] <- as.factor(z[,6])
 
-# 2 cluster
-kpres2 <-kproto(x=z,k=2)
-kpres2
+set.seed(19745)
 
-# 3 cluster
-kpres3 <-kproto(x=z,k=3)
-kpres3
-
-# 4 cluster
-kpres4 <-kproto(x=z,k=4)
-kpres4
+# 4
+kpres4.2 <-kproto(x = z,k=4)
+kpres4.2
 
 # Scree plot
-n.scree <- ncol(z) - 2
+n.scree <- ncol(z)
 Es <- numeric(n.scree)
-for(i in 1:n.scree){ 
-  kpres <- kproto(z, k = i, nstart = 5, verbose = FALSE) 
+for(i in 1:n.scree){
+  kpres <- kproto(z, k = i, nstart = 5, verbose = FALSE)
   Es[i] <- kpres$tot.withinss
-  } 
+  }
 
-plot(1:n.scree, Es[1:4], type = "b", ylab = "Objective Function",
+plot(1:n.scree, Es[1:6], type = "b", ylab = "Objective Function",
      xlab = "# Clusters", main = "ScreePlot")
 
-# Add with three clusters
-test_all1.9$cluster4 <- kpres4$cluster
-
+# Add with four clusters (based on scree plot)
+test_all1.9$cluster4 <- kpres4.2$cluster
 
 # Turn some variables into factors
-lapply(test_all1.9, is.factor)
 test_all1.9$Sub.product <- as.factor(test_all1.9$Sub.product)
-test_all1.9$Sub.issue <- as.factor(test_all1.9$Sub.issue)
 test_all1.9$Issue <- as.factor(test_all1.9$Issue)
 test_all1.9$Company.public.response <- as.factor(test_all1.9$Company.public.response)
 test_all1.9$Submitted.via <- as.factor(test_all1.9$Submitted.via)
 test_all1.9$Timely.response. <- as.factor(test_all1.9$Timely.response.)
-test_all1.9$Consumer.disputed. <- as.factor(test_all1.9$Consumer.disputed.)
 test_all1.9$cluster4 <- as.factor(test_all1.9$cluster4)
 
-# Check factor levels before removing variables
-nlevels(as.factor(test_all1.9$Company)) # over 2000 levels with very few obs. per level
-
-# Drop medical debt, old_service_mem, Sopoc, SoslhwsldidA, consumer disputed, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
+# Drop medical debt, old_service_mem, SoslhwsldidA, consumer disputed, pct_old out of the data because they are represented in the cluster. Drop state, zip code (keep the imputed one), county, product (all debt collection), customer complaint narrative (unique), complaint ID (unique), date sent (because it is nearly identical to date received), company (over 2000 levels)
 test_all2.0 <- test_all1.9 %>%
-  select(-c(State, ZIP.code, Sub.issue, Company.public.response, Consumer.disputed., pct_young, SoslhwsldidA, old_service_mem, medical_debt, Consumer.complaint.narrative, COUNTYNAME, STCOUNTYFP, Complaint.ID, Product, AGEGRP, Company, Date.sent.to.company, Tags))
+  select(-c(State, zip2, ZIP.code, Sub.issue, Company.public.response, Consumer.disputed., pct_young, SoslhwsldidA, old_service_mem, medical_debt, Consumer.complaint.narrative, Complaint.ID, STCOUNTYFP, Product, COUNTYNAME, AGEGRP, Company, Date.sent.to.company, Tags))
 
 # Extract year from date received
-test_all2.0$year <- format(as.Date(test_all2.0$Date.received, format="%m/%d/%y"),"%y")
+test_all2.0$year <- format(as.Date(test_all2.0$Date.received, format="%m/%d/%Y"),"%y")
 test_all2.0$year <- paste0("20", test_all2.0$year)
 
 # Drop most of the Census variables, date received (because we have the year now)
-test_all2.1 <- test_all2.0[, -c(1:3, 12:88, 99:100)]
+test_all2.1 <- test_all2.0[, -c(1:3, 11:87)]
 
-# Recode levels of subproduct
+# Recode levels of subproduct to collapse alike levels
 test_all2.1 <- test_all2.1 %>%
-  mutate(Sub.product = case_when(Sub.product == "Auto" ~ "Auto debt",
+  mutate(Sub.product2 = case_when(Sub.product == "Auto" ~ "Auto debt",
                                  Sub.product == "Credit card" ~ "Credit card debt",
-                                 Sub.product == "Federal student loan" ~ "Federal student loan debt",
+                                 Sub.product == "Federal student loan" ~ "Student loan debt",
+                                 Sub.product == "Non-federal student loan" ~ "Student loan debt",
+                                 Sub.product == "Federal student loan debt" ~ "Student loan debt",
+                                 Sub.product == "Private student loan debt" ~ "Student loan debt",
                                  Sub.product == "Mortgage" ~ "Mortgage debt",
                                  Sub.product == "Other (i.e. phone, health club, etc.)" ~ "Other debt",
                                  Sub.product == "Payday loan" ~ "Payday loan debt",
                                  Sub.product == "Medical" ~ "Medical debt",
                                  .default = Sub.product))
-table(test_all2.1$Sub.product)
 
+# Remove the original Sub.product variable
+test_all2.1 <- test_all2.1 %>%
+  select(-c(Sub.product))
 
+# Choosing variables; removing race variables because we have Sopoc (share of people of color by county), removing White community specific variables because we have the share of white people through the share of people of color by county, and removing community of color variables because they were ~80% missing and we imputed that data, so it's likely not accurate even if it comes back as a significant predictor in our models
 test_all2.2 <- test_all2.1 %>%
-  select(c(relief, Sub.product, Issue, Consumer.consent.provided., Submitted.via, Timely.response., pct_hisp, pct_women, service_mem, old, none, AldrA, CcddrA, CcddrCoc, Sopoc, PC1, year)) %>%
+  select(-c(pct_hisp, pct_asian, pct_blk, pct_native, MdicWc, CcddrWc, AldrWc, MccddWc, SoslhwsldidWc, SwadicCoc, MdicCoc, AldrCoc, CcddrCoc, MccddCoc, SoslhwsldidCoc)) %>%
   mutate(relief = as.factor(relief))
 
-
-test_all2.2$relief <- as.factor(test_all2.2$relief)
-class_xtest <- sparse.model.matrix(relief ~ .-1, data = test_all2.2)
-class_ytest <- as.array(test_all2.2$relief)
-y_class_pred <- predict(xgb.train, class_xtest)
-y_class_pred2 <- as.numeric(y_class_pred)
-class_ytest2 <- as.numeric(as.character(class_ytest[-c(1:2)]))
-confusion_matrix3 <- table(Actual = class_ytest2, Predicted = ifelse(y_class_pred2 > 0.5, 1, 0))
-confusion_matrix3
-
-accuracy_rate <- (37807+57)/(37807+121+57+5915)
-accuracy_rate
+### RANDOM FOREST
+set.seed(182654) # set random seed
+rf.predict2 <- predict(relief.rf, na.omit(test_all2.2), method = "class")
+table(Predicted = rf.predict2, Actual = na.omit(test_all2.2)$relief)
+rf.accuracy2 <- (31759 + 1498)/(31759 + 1498 + 6168 + 4475) # 0.7575626
+rf.F1_2 <- F1_Score(rf.predict2, na.omit(test_all2.2)$relief) # 0.8564879
 
 ```
+
 
 # 11. Compare and contrast the models you decide to run. Choose the model you think is optimal and explain why?
 
@@ -957,4 +962,25 @@ accuracy_rate
 
 ## c. Which has the best fit?
 
+
 # 12. After picking the best model, drop one variable. The dummy variable for Older American you made from the original data set tags and rerun. Does the aggregated older American percentages from the Census data provide the same level of details and predictive accuracy as the micro data provided by the original dataset? Do you think these results are representative of other demographic characteristics.
+```{r}
+# Remove dummy for Older American
+default_trn1 <- default_trn %>%
+  select(-c(old))
+
+default_tst1 <- default_tst %>%
+  select(-c(old))
+
+set.seed(182654) # set random seed
+relief.rf.no.old <- train(relief ~., data = default_trn1,
+                   method = "rf",
+                   trControl = train_control, ntree = 100)
+
+# Prediction
+rf.predict.no.old <- predict(relief.rf.no.old, default_tst1, method = "class")
+table(Predicted = rf.predict.no.old, Actual = default_tst1$relief)
+rf.accuracy.no.old <- (8376 + 9695)/(8376 + 9695 + 1643 + 279) # 0.9038664
+rf.F1.no.old <- F1_Score(rf.predict.no.old, default_tst1$relief) # 0.8970761
+
+```
