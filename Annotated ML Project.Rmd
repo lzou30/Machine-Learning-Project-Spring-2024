@@ -12,7 +12,7 @@ rm(list = ls())
 # Setup
 knitr::opts_chunk$set(echo = TRUE)
 
-# Load packages
+# Load packages needed throughou 
 pacman::p_load(tidyverse, ggplot2, scales, glmnet, pls, randomForest, rpart, DescTools, readxl, corrplot, ggcorrplot, factoextra, ggfortify, clustMixType, wesanderson, caret, rpart.plot, xgboost, reshape2, MLmetrics, SHAPforxgboost, ROSE, DiagrammeR, randomForestExplainer)
 
 # Set custom theme
@@ -50,25 +50,25 @@ group1 <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Da
 colnames(group1)
 group1 <- group1[,-1] #drop the additional index column
 
-# Add leading zero
+# Add leading zero to zipcodes missing it
 add_char <- function(x, pos, insert) {      
   gsub(paste0("^(.{", pos, "})(.*)$"),
        paste0("\\1", insert, "\\2"),
        x)
 }
 
-which(nchar(group1$ZIP.code) == 4) # no four-digit zip codes
+which(nchar(group1$ZIP.code) == 4) # check for no four-digit zip codes
 group1.1 <- group1 %>%
   filter(State != "AE" & State != "AP") # Remove non-state observations
 
 # Load in zip_fips
 zip_fips <- read_csv("/Users/morgankleidon/Desktop/Spring 2024/Machine Learning/Data/zip_fips.csv")
 colnames(zip_fips)
-zip_fips <- zip_fips[,-1]
+zip_fips <- zip_fips[,-1] #drop the additional index column
 str(zip_fips$ZIP)
 table(zip_fips$STATE)
 
-# Filter out non-US states
+# Filter out non-US states like Puerto Rico and Guam 
 zip_fips_states <- zip_fips %>%
   filter(STATE != "PR" & STATE != "GU" & STATE != "DC" & STATE != "VI")
 
@@ -96,7 +96,7 @@ group1.2 <- group1.2[,-15]
 ## i. Suggestion: You will want to create a dummy variable to indicate if the variable is missing for the rest of the analysis. Using the aggregate() function in r, this should be an easy task.
 
 ```{r}
-# Submitted.via
+# Submitted.via 
 table(group1.2$Submitted.via, group1.2$missing_zip)
 group1.3 <- group1.2 %>%
   mutate(Submitted.via = case_when(Submitted.via == "Web Referral" ~ "Referral",
@@ -104,20 +104,24 @@ group1.3 <- group1.2 %>%
             Submitted.via == "Referral" ~ "Referral",
             Submitted.via == "Postal mail" ~ "Postal mail",
             Submitted.via == "Phone" ~ "Phone",
-            Submitted.via == "Fax" ~ "Fax")) # Recode Web Referral to Referral
-table(group1.3$Submitted.via, group1.3$missing_zip) # Meets assumptions now :) 
+            Submitted.via == "Fax" ~ "Fax")) # Recode Web Referral to Referral because web referral had too few observations and did not meet the assumptions to run a chi-square test 
+table(group1.3$Submitted.via, group1.3$missing_zip) # Now our chi-squared meets assumptions :) 
+#perform a chi-squared to test for any significant associations between how the complaint was submitted and observations with missing zipcodes
 chisq.test(group1.3$Submitted.via, group1.3$missing_zip) # p-value significant
 
 # Tags
 table(group1.3$Tags, group1.3$missing_zip)
+#we perform a Fischer.test to see if there are any nonrandom associations between two categorical variables
 fisher.test(group1.3$Tags, group1.3$missing_zip) # Does not meet assumptions
 
 # Relief
 table(group1.3$relief, group1.3$missing_zip)
-chisq.test(group1.3$relief, group1.3$missing_zip) # p-value = 1
+#perform a chi-squared to test for any significant associations between where debt relief was granted and observations with missing zipcodes
+chisq.test(group1.3$relief, group1.3$missing_zip) # p-value = 1, no association between the variables tested
 
 # Timely.response
 table(group1.3$Timely.response., group1.3$missing_zip)
+#perform a chi-squared to test for any significant associations between timely response of a debt relief company and observations with missing zipcodes
 chisq.test(group1.3$Timely.response., group1.3$missing_zip) # p-value *almost* significant
 
 ```
@@ -224,7 +228,7 @@ census2 <- census %>%
   group_by(STCOUNTY, AGEGRP) %>%
   summarize(across(TOT_POP:HNAC_FEMALE, ~mean(., na.rm = TRUE)))
 
-# Rename columns
+# Rename columns of census 2 
 colnames(census2) <- paste0(colnames(census2), "_MEAN")
 names(census2)[names(census2) == "STCOUNTY_MEAN"] <- "STCOUNTY"
 names(census2)[names(census2) == "AGEGRP_MEAN"] <- "AGEGRP"
@@ -358,7 +362,7 @@ group1.9 <- merge(group1.9, county_debt1[,-1], by.x = "fips", by.y = "fips2", al
 ```{r}
 # Make binary variable out of Sub product == Medical Debt
 group1.9$medical_debt <- ifelse((group1.9$Sub.product == "Medical debt" | group1.9$Sub.product == "Medical"), 1, 0)
-
+#standardize the data for culsteirng 
 z <- group1.9[, c("medical_debt", "old_service_mem",
                 "pct_old", "pct_young",
                 "SoslhwsldidA", "Consumer.disputed.")]
@@ -384,14 +388,14 @@ kpres4
 kpres5 <- kproto(x = z, k = 5)
 kpres5
 
-# Scree plot
+# Create s scree plot to determine the optimal number of clusters
 n.scree <- ncol(z)
 Es <- numeric(n.scree)
 for(i in 1:n.scree){ 
   kpres <- kproto(z, k = i, nstart = 5, verbose = FALSE) 
   Es[i] <- kpres$tot.withinss
   } 
-
+#plot the scree plot 
 plot(1:n.scree, Es[1:6], type = "b", ylab = "Objective Function",
      xlab = "# Clusters", main = "ScreePlot")
 
@@ -433,7 +437,7 @@ nlevels(as.factor(group1.9$Company)) # over 2000 levels with very few obs. per l
 group2.0 <- group1.9 %>%
   select(-c(State, ZIP.code, Sub.issue, Company.public.response, Consumer.disputed., pct_young, SoslhwsldidA, old_service_mem, medical_debt, Consumer.complaint.narrative, Complaint.ID, Product, COUNTYNAME, STCOUNTYFP, AGEGRP, Company, Date.sent.to.company, Tags))
 
-# Extract year from date received
+# Extract year from date received, we will measure dates in years, consistently throughout the analysis
 group2.0$year <- format(as.Date(group2.0$Date.received, format="%m/%d/%y"),"%y")
 group2.0$year <- paste0("20", group2.0$year)
 
@@ -479,10 +483,11 @@ group2.2 <- group2.1 %>%
   select(-c(pct_hisp, pct_asian, pct_blk, pct_native, MdicWc, CcddrWc, AldrWc, MccddWc, SoslhwsldidWc, SwadicCoc, MdicCoc, AldrCoc, CcddrCoc, MccddCoc, SoslhwsldidCoc)) %>%
   mutate(relief = as.factor(relief))
 
-# Oversample the data and create a test and train
+# Oversample the data  
 group2.3 <- ovun.sample(relief ~ ., data = group2.2, method = "over", seed = 182654)
 group2.3 <- as.data.frame(group2.3$data) # coerce to dataframe
 
+#Partition data frame above into test and train datasets 
 set.seed(182654)
 default_idx = createDataPartition(group2.3$relief, p = 0.75, list = FALSE) # use 75% of data in training
 default_trn = group2.3[default_idx, ] # partition into train
